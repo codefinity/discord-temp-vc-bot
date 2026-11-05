@@ -1,0 +1,14 @@
+# Secrets: the bot's token lives here. Never commit this file.
+.env
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+
+# Virtual environments
+.venv
