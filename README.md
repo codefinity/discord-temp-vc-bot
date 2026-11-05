@@ -1,0 +1,149 @@
+# Temporary Voice Channel Bot
+
+A Discord bot that gives each member their own voice channel on a timer.
+
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away.
+
+- **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
+- **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
+
+## How the code is organized
+
+```
+temp-vc-bot/
+├── pyproject.toml              Project settings and dependencies
+├── uv.lock                     Exact dependency versions
+├── .env.example                Template for your settings
+├── .gitignore                  Keeps .env out of git
+├── README.md                   This file
+├── DEPLOYMENT.md               Setup guide, usage and troubleshooting
+├── HOSTING.md                  Host comparison and server setup
+├── src/temp_vc_bot/
+│   ├── main.py                 Entry point
+│   ├── config.py               Loads and checks the .env settings
+│   ├── constants.py            Every duration, limit and label
+│   ├── bot.py                  Creates the bot, sets intents, loads the cog
+│   ├── state.py                One channel's session, and the list of sessions
+│   ├── errors.py               Friendly error messages (added)
+│   ├── cogs/
+│   │   └── voice_events.py     Hub joins, people joining and leaving, startup
+│   ├── services/
+│   │   ├── channel_manager.py  Create, delete, rename, lock, limit
+│   │   └── timer.py            Countdown, extension, auto-close
+│   └── views/
+│       ├── owner_only.py       Shared owner-only check (added)
+│       ├── control_panel.py    Rename, limit, lock and timer controls
+│       ├── modals.py           Rename and user limit forms
+│       └── extend_prompt.py    Yes and No extension buttons
+└── tests/                      Automated tests (added)
+    ├── fake_discord.py         A stand-in for Discord's servers
+    ├── test_end_to_end.py      The real bot against the stand-in
+    └── test_units.py           Small pieces on their own
+```
+
+**Three additions to the suggested layout:**
+
+- `errors.py`: the buttons, forms and event handlers all need the same friendly messages, so they live in one place.
+- `views/owner_only.py`: the control panel and the extension prompt share one owner check. It has to be written a particular way (see the comment in that file), so one copy is safer than two.
+- `tests/`: lets you check a change without a live server. The bot doesn't need these files to run.
+
+## Where the brief and Discord disagree
+
+The brief says to document any requirement that conflicts with how Discord works, and to build the closest version that works. There are four.
+
+### 1. The bot can't give itself "Manage Permissions" in an overwrite
+
+The brief asks for five permissions through overwrites, including Manage Permissions. [Discord's documentation](https://docs.discord.com/developers/resources/guild) says: *"Setting `MANAGE_ROLES` permission in channels is only possible for guild administrators."* Manage Permissions is that same permission, under the name Discord shows on a channel.
+
+**What the bot does:** it writes the other four (View Channel, Connect, Manage Channel, Move Members) into each channel's overwrite. It gets Manage Permissions from the server-level **Manage Roles** permission in its invite link, which works the same on every channel. The bot can manage permissions on each temp VC, without being a server administrator.
+
+If you do make the bot an Administrator, the code notices and writes the fifth one into the overwrite too.
+
+### 2. A bot can only be in one voice channel per server
+
+This is a Discord limit. The first temp VC gets the bot connected to it. If a second temp VC is created while the bot is still in the first, the bot stays where it is and manages the second channel through its permissions only.
+
+**What you'll notice:** nothing is missing from the second channel. Its buttons, timer and cleanup all work the same. The bot just isn't listed as being in it.
+
+When the bot's channel closes, it leaves voice and joins the next channel created after that. It doesn't move into a channel that already exists.
+
+### 3. A user limit of 99 can't get an extra seat
+
+The brief asks for 0 to 99 people, plus a seat for the bot. Discord's maximum is [99 seats](https://docs.discord.com/developers/resources/channel), so 99 people plus the bot would need 100.
+
+**What the bot does:** it sets 99 seats, which leaves room for 98 people, and tells the owner so. Every lower number works as the brief describes.
+
+### 4. Some people can ignore a lock or a limit
+
+Discord lets some people past these, and a bot can't change that:
+
+- Server administrators and the server owner can always connect.
+- Anyone with [Move Members](https://docs.discord.com/developers/topics/voice-connections) can join a full channel.
+- Lock only denies `@everyone`, as the brief specifies. A role with an explicit **Allow** on Connect in the category still gets in. To avoid this, don't give roles an explicit Connect allow on that category.
+
+## Discord behaviour the code handles
+
+These don't conflict with the brief, but the bot would fail without handling them:
+
+- **Voice needs `davey`.** Discord has [required end-to-end encryption (DAVE)](https://docs.discord.com/developers/topics/voice-connections) on voice channels since March 2026, and refuses other connections with close code 4017. Support arrived in discord.py 2.7.0, and the library needs the `davey` package to use it. The `discord.py[voice]` extra installs both `davey` and PyNaCl.
+- **Renames could hang for 10 minutes.** By default, discord.py quietly sleeps through a rate limit, so a rename would appear to do nothing. The bot sets `max_ratelimit_timeout`, which makes the library raise an error instead, and the owner sees "try again in about 9 minutes". Discord doesn't document the rename limit, so the bot relies on Discord's own answer and doesn't count renames itself.
+- **Losing Connect removes other permissions.** [Denying Connect also denies Manage Channel](https://docs.discord.com/developers/topics/permissions). The bot's own Connect overwrite is what lets it still manage and delete a locked channel.
+- **A channel nobody entered gets no "leave" event.** If the owner leaves voice before the bot can move them in, the bot deletes the new channel at once. Otherwise it would stay forever.
+- **The bot can reconnect at any time.** Discord may fire `on_ready` more than once, and discord.py then replaces its cached objects. So startup cleanup runs only once, sessions store IDs instead of objects, and the bot catches up on anything it missed while disconnected.
+
+## Assumptions
+
+The brief left these open. Each one is easy to change.
+
+**Timer**
+
+- The maximum lifetime of 50 minutes counts from when the timer starts. A channel with only its owner in it has no timer, because of the start condition, so it stays open for as long as they stay.
+- The extra 10 minutes count from when the base time ended, not from when the owner clicked Yes. Otherwise, answering late would push the channel past 50 minutes. If the owner takes the full 2 minutes to answer, about 8 minutes remain.
+- If the bot can't post the extension prompt, for example because it lost permission, that counts as no answer and the channel closes.
+
+**Ownership**
+
+- Ownership doesn't transfer. If the owner leaves while others stay, the channel keeps running and the owner can return through the hub. If they don't answer the prompt, the channel closes.
+- The owner's only special powers are the panel, and being able to connect when the channel is locked or full (through the hub). They get no Discord permissions to edit the channel by hand.
+
+**Bots**
+
+- Every bot counts as a non-human, not just this one. A music bot doesn't start the timer or keep an empty channel open, and it gets its own extra seat.
+- The bot self-mutes as well as self-deafens, since it never plays audio.
+
+**Control panel**
+
+- The panel and the timer are two separate messages, so each can update on its own.
+- The panel message tags the owner, so they notice it. Anyone in the chat can see it.
+- Besides the four permissions in its overwrite, the bot also gives itself Send Messages and Embed Links on each channel, so a category's settings can't stop it posting the panel.
+- The lock button's label shows the state and the action, such as "Unlocked (click to lock)", so nobody reads "Locked" as a command.
+- Setting a limit lower than the number of people inside removes nobody. It only stops new people joining.
+- Names have spaces trimmed from both ends. Renaming a channel to its current name does nothing, so it doesn't use up a rename.
+
+**Server setup**
+
+- The bot serves the one server in `GUILD_ID` and ignores any others it's added to.
+- The hub can be inside or outside the category.
+- Startup cleanup deletes only channels that carry the bot's own Manage Channels overwrite. The hub and any permanent channels in the category are left alone. If you ever add a member-level overwrite for the bot to the category itself, synced channels would look like leftovers, so use a role instead.
+- Errors that happen before a temp VC exists are posted in the hub's text chat for 30 seconds, tagging the member.
+
+**Restarts**
+
+- A restart deletes every temp VC, even with people in them, as the brief specifies. Plan updates for a quiet moment.
+- Anyone already in the hub when the bot starts gets a channel straight away. Discord sends no event for people already there, so otherwise they'd wait until they rejoined.
+
+**Project**
+
+- The project is in its own `temp-vc-bot/` folder, matching the layout in the brief.
+- Python is pinned to 3.12, as the brief asks.
+- `aiohttp` is listed as a direct dependency, because `errors.py` imports it, though discord.py would install it anyway.
+
+## Running the tests
+
+```
+uv run pytest
+```
+
+The tests run the real bot and the real discord.py library against a local stand-in for Discord, over real HTTP and websockets. No token or internet connection is needed. The stand-in enforces the Discord rules above, so it refuses things that real Discord would refuse.
+
+**What the tests can't cover:** the stand-in has no audio connection, so the bot's real voice handshake, including DAVE, can only be checked on a real server. Discord's real responses can also differ from the stand-in's. The [test checklist in DEPLOYMENT.md](DEPLOYMENT.md#test-checklist) covers what to try on a real server.
