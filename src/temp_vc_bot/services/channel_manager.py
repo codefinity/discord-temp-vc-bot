@@ -15,7 +15,6 @@ from ..constants import (
     MAX_CHANNEL_NAME_LENGTH,
     MAX_USER_LIMIT,
     NO_USER_LIMIT,
-    VOICE_CONNECT_TIMEOUT_SECONDS,
 )
 from ..errors import API_ERRORS, CategoryMissingError, ChannelGoneError
 from ..state import SessionRegistry, TempVCSession
@@ -65,6 +64,8 @@ def _bot_overwrite(me: discord.Member) -> discord.PermissionOverwrite:
     """The permissions the bot gives itself on each temp VC."""
     overwrite = discord.PermissionOverwrite(
         view_channel=True,
+        # The bot never joins voice, but Discord won't let anyone edit a voice
+        # channel they can't connect to. This keeps a locked channel manageable.
         connect=True,
         manage_channels=True,
         move_members=True,
@@ -209,10 +210,10 @@ class ChannelManager:
         )
         session.locked = locked
 
-    # ----- The bot's seat ---------------------------------------------------
+    # ----- Seats for bots ---------------------------------------------------
 
     async def refresh_user_limit(self, session: TempVCSession) -> None:
-        """Re-apply a channel's limit after a bot joins or leaves it."""
+        """Re-apply a channel's limit after a bot, such as a music bot, joins or leaves it."""
         channel = self.get_channel(session)
         if channel is None:
             return
@@ -229,30 +230,10 @@ class ChannelManager:
             await channel.edit(user_limit=seats, reason="Temp VC user limit")
         return seats - bots_in_channel
 
-    async def connect_bot(self, session: TempVCSession) -> None:
-        """Join the temp VC deafened, unless the bot is already in another one.
-
-        Discord allows a bot in only one voice channel per server. If it is busy, it
-        stays where it is and manages this channel through its permissions.
-        """
-        channel = self.get_channel(session)
-        if channel is None or session.closed:
-            return
-        if channel.guild.voice_client is not None:
-            log.info("Already in a voice channel, so managing channel %s by permissions only.", channel.id)
-            return
-        try:
-            await channel.connect(timeout=VOICE_CONNECT_TIMEOUT_SECONDS, self_deaf=True, self_mute=True)
-        except (*API_ERRORS, RuntimeError) as error:
-            # RuntimeError means a voice library is missing. Either way the channel
-            # still works without the bot in it, so this is not fatal.
-            # %r shows the type of error too. A timeout's own message is empty.
-            log.warning("Could not join voice channel %s: %r", channel.id, error)
-
     # ----- Closing ----------------------------------------------------------
 
     async def close_session(self, session: TempVCSession, reason: str) -> None:
-        """Cancel a session's timer, disconnect the bot and delete the channel.
+        """Cancel a session's timer and delete the channel.
 
         It is safe to call this twice. Whichever call comes second does nothing.
         """
@@ -261,21 +242,9 @@ class ChannelManager:
         session.closed = True
         log.info("Closing temp VC %s: %s.", session.channel_id, reason)
         session.stop_background_work()
-        await self._disconnect_bot_from(session.channel_id)
         channel = self.get_channel(session)
         if channel is not None:
             await self._delete_channel(channel)
-
-    async def _disconnect_bot_from(self, channel_id: int) -> None:
-        """Leave voice if the bot is in this channel."""
-        guild = self.guild
-        voice_client = guild.voice_client if guild else None
-        if voice_client is None or getattr(voice_client.channel, "id", None) != channel_id:
-            return
-        try:
-            await voice_client.disconnect(force=True)
-        except API_ERRORS as error:
-            log.warning("Could not leave voice channel %s: %s", channel_id, error)
 
     async def _delete_channel(self, channel: discord.VoiceChannel) -> None:
         """Delete a channel, waiting and retrying if Discord is rate limiting us."""

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import logging
 import re
 import time
 from typing import Any
@@ -15,7 +14,7 @@ from PIL import Image
 
 from temp_vc_bot import constants, countdown_ring
 from temp_vc_bot.bot import TempVCBot
-from temp_vc_bot.services import channel_manager, timer
+from temp_vc_bot.services import timer
 from temp_vc_bot.state import TimerPhase
 from temp_vc_bot.views import extend_prompt
 
@@ -191,32 +190,20 @@ class TestBotsRole:
         _, channel_id = await make_vc(world)
         assert int(world.overwrite_on(channel_id, BOT_USER_ID)["allow"]) & MANAGE_ROLES
 
-    async def test_bot_joins_deafened_and_muted(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_bot_never_joins_voice(self, world: FakeDiscord, bot: TempVCBot) -> None:
         _, channel_id = await make_vc(world)
-        assert world.voice[BOT_USER_ID] == channel_id
-        assert world.bot_voice_flags == {"self_deaf": True, "self_mute": True}
-
-    async def test_bot_already_in_a_channel_stays_there_and_manages_the_new_one(self, world: FakeDiscord, bot: TempVCBot, caplog: pytest.LogCaptureFixture) -> None:
-        caplog.set_level(logging.INFO)
-        _, first = await make_vc(world, "Alice")
-        second_owner, second = await make_vc(world, "Bob")
-        assert world.voice[BOT_USER_ID] == first
-        assert BOT_USER_ID not in world.people_in(second)
-        assert "by permissions only" in caplog.text, "This is expected, so it shouldn't show as a failed connection."
-        assert "Could not join voice channel" not in caplog.text
-        # The bot can still manage the second channel, using its permissions.
-        record = await world.click(second_owner, world.panel_message(second), "Unlocked (click to lock)")
-        assert record.acknowledged
-        assert int(world.overwrite_on(second, EVERYONE_ROLE_ID)["deny"]) & CONNECT
-
-    async def test_bot_can_join_a_later_channel_after_its_first_one_closes(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        first_owner, first = await make_vc(world, "Alice")
-        await world.leave_voice(first_owner)
-        await world.settle()
-        assert first not in world.channels
         assert BOT_USER_ID not in world.voice
-        _, second = await make_vc(world, "Bob")
-        assert world.voice[BOT_USER_ID] == second
+        assert BOT_USER_ID not in world.people_in(channel_id)
+        assert bot.channel_manager.guild.voice_client is None
+
+    async def test_bot_manages_each_channel_without_being_in_it(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # The bot works through its permissions, so every channel gets working controls.
+        for name in ("Alice", "Bob"):
+            owner, channel_id = await make_vc(world, name)
+            record = await world.click(owner, world.panel_message(channel_id), "Unlocked (click to lock)")
+            assert record.acknowledged
+            assert int(world.overwrite_on(channel_id, EVERYONE_ROLE_ID)["deny"]) & CONNECT
+        assert BOT_USER_ID not in world.voice
 
 
 class TestControlPanelAccess:
@@ -341,10 +328,10 @@ class TestUserLimit:
         click = await world.click(owner, panel, "User limit")
         return await world.submit_modal(owner, panel, click.modal, value)
 
-    async def test_limit_gets_an_extra_seat_when_the_bot_is_in_the_channel(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_limit_is_exact_because_the_bot_stays_out_of_the_channel(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
         result = await self.set_limit(world, owner, channel_id, "2")
-        assert world.channels[channel_id]["user_limit"] == 3
+        assert world.channels[channel_id]["user_limit"] == 2
         assert "set to 2" in result.private_texts()[0]
 
     async def test_limit_really_admits_that_many_humans(self, world: FakeDiscord, bot: TempVCBot) -> None:
@@ -354,23 +341,27 @@ class TestUserLimit:
         assert world.can_join(second, channel_id)
         await world.join_voice(second, channel_id)
         await world.settle()
-        assert not world.can_join(third, channel_id), "Two humans plus the bot fill the channel."
+        assert not world.can_join(third, channel_id), "Two humans fill the channel."
 
-    async def test_no_extra_seat_when_the_bot_is_elsewhere(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        await make_vc(world, "Alice")  # The bot sits in Alice's channel.
-        owner, channel_id = await make_vc(world, "Bob")
-        await self.set_limit(world, owner, channel_id, "2")
-        assert world.channels[channel_id]["user_limit"] == 2
-
-    async def test_zero_means_no_limit_even_with_the_bot_inside(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_zero_means_no_limit_even_with_a_bot_inside(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
+        await world.join_voice(world.add_member("MusicBot", bot=True), channel_id)
+        await world.settle()
         await self.set_limit(world, owner, channel_id, "5")
         result = await self.set_limit(world, owner, channel_id, "0")
         assert world.channels[channel_id]["user_limit"] == 0
         assert "removed" in result.private_texts()[0]
 
-    async def test_99_with_the_bot_inside_stays_within_discords_maximum_and_says_so(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_99_fits_99_people_when_no_bot_is_inside(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
+        result = await self.set_limit(world, owner, channel_id, "99")
+        assert world.channels[channel_id]["user_limit"] == 99
+        assert "set to 99" in result.private_texts()[0]
+
+    async def test_99_with_a_bot_inside_stays_within_discords_maximum_and_says_so(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await world.join_voice(world.add_member("MusicBot", bot=True), channel_id)
+        await world.settle()
         result = await self.set_limit(world, owner, channel_id, "99")
         assert world.channels[channel_id]["user_limit"] == 99
         assert "only 98 people fit" in result.private_texts()[0]
@@ -382,21 +373,17 @@ class TestUserLimit:
         assert world.channels[channel_id]["user_limit"] == 0
         assert "whole number" in result.private_texts()[0]
 
-    async def test_seat_is_removed_when_the_bot_leaves(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_another_bot_gets_a_seat_while_it_is_inside(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
         await self.set_limit(world, owner, channel_id, "4")
-        assert world.channels[channel_id]["user_limit"] == 5
-        await bot.channel_manager.guild.voice_client.disconnect(force=True)
-        await world.settle()
         assert world.channels[channel_id]["user_limit"] == 4
-
-    async def test_seat_is_added_for_another_bot_too(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        owner, channel_id = await make_vc(world)
-        await self.set_limit(world, owner, channel_id, "4")
         music_bot = world.add_member("MusicBot", bot=True)
         await world.join_voice(music_bot, channel_id)
         await world.settle()
-        assert world.channels[channel_id]["user_limit"] == 6
+        assert world.channels[channel_id]["user_limit"] == 5
+        await world.leave_voice(music_bot)
+        await world.settle()
+        assert world.channels[channel_id]["user_limit"] == 4
 
     async def test_panel_shows_the_human_number_not_the_seat_count(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
@@ -508,11 +495,6 @@ class TestTimerStart:
         owner, channel_id = await make_vc(world)
         assert timer_text(world, channel_id) == "Waiting for someone to join…"
         assert bot.sessions.by_owner(owner).phase is TimerPhase.WAITING
-
-    async def test_our_bot_being_in_the_channel_does_not_start_it(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        owner, channel_id = await make_vc(world)
-        assert BOT_USER_ID in world.people_in(channel_id)
-        assert not bot.sessions.by_owner(owner).timer_started
 
     async def test_another_bot_joining_does_not_start_it(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
@@ -848,14 +830,6 @@ class TestCleanup:
         assert channel_id not in world.channels
         assert bot.sessions.by_channel(channel_id) is None
 
-    async def test_bot_leaves_voice_when_its_channel_is_deleted(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        owner, _ = await make_vc(world)
-        await world.leave_voice(owner)
-        await world.settle()
-        assert BOT_USER_ID not in world.voice
-        assert bot.channel_manager.guild.voice_client is None
-        assert world.bot_left_voice_itself, "The bot should leave before deleting, so it isn't kicked mid-connection."
-
     async def test_another_bot_left_alone_does_not_keep_the_channel_open(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
         await world.join_voice(world.add_member("MusicBot", bot=True), channel_id)
@@ -1119,41 +1093,6 @@ class TestDiscordSizeLimits:
         assert len(world.channels[channel_id]["name"]) == 100
 
 
-@pytest.fixture
-def real_voice_client(world: FakeDiscord, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use discord.py's real VoiceClient. The fake has no voice server, so it can't finish.
-
-    This depends on `world` so it runs after it, and undoes its FakeVoiceClient.
-    """
-    monkeypatch.setitem(discord.abc.Connectable.connect.__kwdefaults__, "cls", discord.VoiceClient)
-    monkeypatch.setattr(channel_manager, "VOICE_CONNECT_TIMEOUT_SECONDS", 0.5)
-
-
-@pytest.mark.usefixtures("real_voice_client")
-class TestRealVoiceClient:
-    async def test_failed_connection_is_cleaned_up_so_a_later_channel_can_try_again(self, world: FakeDiscord, bot: TempVCBot, caplog: pytest.LogCaptureFixture) -> None:
-        _, channel_id = await make_vc(world, "Alice")
-        await world.wait_for(lambda: "Could not join voice channel" in caplog.text)
-        await world.settle()
-        assert "TimeoutError" in caplog.text, "The log has to say why, for anyone troubleshooting."
-        assert channel_id in world.channels, "The channel works without the bot in it."
-        assert bot.channel_manager.guild.voice_client is None, "A dead connection must not block later ones."
-
-        caplog.clear()
-        caplog.set_level(logging.INFO)
-        await make_vc(world, "Bob")
-        assert "by permissions only" not in caplog.text, "The next channel should get its own attempt."
-
-    async def test_channel_closing_while_the_bot_is_connecting_still_closes_cleanly(self, world: FakeDiscord, bot: TempVCBot, caplog: pytest.LogCaptureFixture) -> None:
-        owner, channel_id = await make_vc(world)
-        await world.leave_voice(owner)
-        await world.wait_for(lambda: channel_id not in world.channels, timeout=5)
-        await world.wait_for(lambda: bot.channel_manager.guild.voice_client is None, timeout=5)
-        await world.settle()
-        assert "Traceback" not in caplog.text
-        assert "Ignoring exception" not in caplog.text
-
-
 class TestErrors:
     async def test_missing_permissions_at_creation_tell_the_member_in_the_hub(self, world: FakeDiscord, start_bot: BotStarter) -> None:
         world.bot_permissions = 0
@@ -1192,18 +1131,6 @@ class TestErrors:
         del world.channels[CATEGORY_ID]
         await start_bot()
         assert "TEMP_VC_CATEGORY_ID" in caplog.text
-
-    async def test_bot_failing_to_join_voice_does_not_break_the_channel(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-        async def refuse(self: Any, **kwargs: Any) -> None:
-            raise TimeoutError("Could not connect in time.")
-
-        monkeypatch.setattr(discord.VoiceChannel, "connect", refuse)
-        owner, channel_id = await make_vc(world)
-        assert BOT_USER_ID not in world.voice
-        assert channel_id in world.channels
-        assert world.panel_message(channel_id)
-        assert "Could not join voice channel" in caplog.text
-        assert "Ignoring exception" not in caplog.text, "The failure should be handled, not left to crash the handler."
 
     async def test_action_on_a_channel_deleted_a_moment_ago_gets_a_friendly_reply(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
