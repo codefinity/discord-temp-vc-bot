@@ -34,8 +34,8 @@ TIMER_CHOICES = tuple(range(MIN_TIMER_MINUTES, MAX_TIMER_MINUTES + 1, TIMER_STEP
 
 # How many real seconds one "minute" above lasts. Keep this at 60 in real use.
 # Lower it to test the timer quickly: at 6, everything runs ten times faster.
-#SECONDS_PER_MINUTE = 60
-SECONDS_PER_MINUTE = 4
+SECONDS_PER_MINUTE = 60
+#SECONDS_PER_MINUTE = 4
 
 
 def minutes_to_delta(minutes: float) -> timedelta:
@@ -57,8 +57,7 @@ MAX_USER_LIMIT = 99  # The most seats a voice channel can have.
 # discord.py normally sleeps through a rate limit, which could freeze a rename
 # for 10 minutes. Above this wait it raises an error instead, so the bot can tell
 # the owner to try later. discord.py does not allow a value below 30.
-MAX_RATE_LIMIT_WAIT_SECONDS = 30.0
-VOICE_CONNECT_TIMEOUT_SECONDS = 30.0  # How long the bot tries to join voice.
+MAX_RATE_LIMIT_WAIT_SECONDS = 90.0
 HUB_NOTICE_SECONDS = 30  # How long an error notice stays in the hub's chat.
 MODAL_TIMEOUT_SECONDS = 15 * 60  # Discord's interaction tokens last 15 minutes.
 DELETE_ATTEMPTS = 3  # Tries at deleting a channel while being rate limited.

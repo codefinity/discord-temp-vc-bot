@@ -2,7 +2,7 @@
 
 A Discord bot that gives each member their own voice channel on a timer.
 
-A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away.
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The bot never joins a voice channel itself. It manages each one through its permissions.
 
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
@@ -51,7 +51,7 @@ temp-vc-bot/
 
 ## Where the brief and Discord disagree
 
-The brief says to document any requirement that conflicts with how Discord works, and to build the closest version that works. There are four.
+The brief says to document any requirement that conflicts with how Discord works, and to build the closest version that works. There are three.
 
 ### 1. The bot can't give itself "Manage Permissions" in an overwrite
 
@@ -61,21 +61,13 @@ The brief asks for five permissions through overwrites, including Manage Permiss
 
 If you do make the bot an Administrator, the code notices and writes the fifth one into the overwrite too.
 
-### 2. A bot can only be in one voice channel per server
+### 2. A user limit of 99 can't get an extra seat
 
-This is a Discord limit. The first temp VC gets the bot connected to it. If a second temp VC is created while the bot is still in the first, the bot stays where it is and manages the second channel through its permissions only.
+The brief asks for 0 to 99 people, plus a seat for the bot. This bot doesn't join voice, so it needs no seat, but another bot in the channel, such as a music bot, still gets one. Discord's maximum is [99 seats](https://docs.discord.com/developers/resources/channel), so 99 people plus a bot would need 100.
 
-**What you'll notice:** nothing is missing from the second channel. Its buttons, timer and cleanup all work the same. The bot just isn't listed as being in it.
+**What the bot does:** it sets 99 seats, which leaves room for 98 people while a bot is inside, and tells the owner so. Every lower number works as the brief describes.
 
-When the bot's channel closes, it leaves voice and joins the next channel created after that. It doesn't move into a channel that already exists.
-
-### 3. A user limit of 99 can't get an extra seat
-
-The brief asks for 0 to 99 people, plus a seat for the bot. Discord's maximum is [99 seats](https://docs.discord.com/developers/resources/channel), so 99 people plus the bot would need 100.
-
-**What the bot does:** it sets 99 seats, which leaves room for 98 people, and tells the owner so. Every lower number works as the brief describes.
-
-### 4. Some people can ignore a lock or a limit
+### 3. Some people can ignore a lock or a limit
 
 Discord lets some people past these, and a bot can't change that:
 
@@ -87,7 +79,6 @@ Discord lets some people past these, and a bot can't change that:
 
 These don't conflict with the brief, but the bot would fail without handling them:
 
-- **Voice needs `davey`.** Discord has [required end-to-end encryption (DAVE)](https://docs.discord.com/developers/topics/voice-connections) on voice channels since March 2026, and refuses other connections with close code 4017. Support arrived in discord.py 2.7.0, and the library needs the `davey` package to use it. The `discord.py[voice]` extra installs both `davey` and PyNaCl.
 - **Renames could hang for 10 minutes.** By default, discord.py quietly sleeps through a rate limit, so a rename would appear to do nothing. The bot sets `max_ratelimit_timeout`, which makes the library raise an error instead, and the owner sees "try again in about 9 minutes". Discord doesn't document the rename limit, so the bot relies on Discord's own answer and doesn't count renames itself.
 - **Losing Connect removes other permissions.** [Denying Connect also denies Manage Channel](https://docs.discord.com/developers/topics/permissions). The bot's own Connect overwrite is what lets it still manage and delete a locked channel.
 - **A channel nobody entered gets no "leave" event.** If the owner leaves voice before the bot can move them in, the bot deletes the new channel at once. Otherwise it would stay forever.
@@ -117,8 +108,8 @@ The brief left these open. Each one is easy to change.
 
 **Bots**
 
-- Every bot counts as a non-human, not just this one. A music bot doesn't start the timer or keep an empty channel open, and it gets its own extra seat.
-- The bot self-mutes as well as self-deafens, since it never plays audio.
+- The bot never joins voice channels. It doesn't need to be in a channel to create, change or delete it, so it manages every temp VC through its permissions. It isn't listed in any channel and uses no seat.
+- Other bots, such as a music bot, count as non-humans. They don't start the timer or keep an empty channel open, and each one gets its own extra seat.
 
 **Control panel**
 
@@ -155,4 +146,4 @@ uv run pytest
 
 The tests run the real bot and the real discord.py library against a local stand-in for Discord, over real HTTP and websockets. No token or internet connection is needed. The stand-in enforces the Discord rules above, so it refuses things that real Discord would refuse.
 
-**What the tests can't cover:** the stand-in has no audio connection, so the bot's real voice handshake, including DAVE, can only be checked on a real server. Discord's real responses can also differ from the stand-in's. The [test checklist in DEPLOYMENT.md](DEPLOYMENT.md#test-checklist) covers what to try on a real server.
+**What the tests can't cover:** Discord's real responses can differ from the stand-in's. The [test checklist in DEPLOYMENT.md](DEPLOYMENT.md#test-checklist) covers what to try on a real server.

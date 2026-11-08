@@ -157,8 +157,8 @@ class VoiceEvents(commands.Cog):
                 return
             session = await self._create_and_move(member)
 
-        # This is outside the lock so that one slow voice connection can't make
-        # everybody else wait for their channel.
+        # This is outside the lock so that one slow setup can't make everybody else
+        # wait for their channel.
         if session is not None:
             await self._finish_setup(member, session)
 
@@ -190,7 +190,11 @@ class VoiceEvents(commands.Cog):
         return None
 
     async def _finish_setup(self, owner: discord.Member, session: TempVCSession) -> None:
-        """Post the controls and timer, then bring the bot into the channel."""
+        """Post the controls and timer.
+
+        The bot never joins the voice channel itself. It manages the channel through
+        its permissions, so it doesn't show up in the channel or take a seat.
+        """
         channel = self.channels.get_channel(session)
         if channel is None or session.closed:
             return
@@ -212,8 +216,6 @@ class VoiceEvents(commands.Cog):
             await self.timers.publish_state(session)
         else:
             await self.timers.maybe_start(session)
-
-        await self.channels.connect_bot(session)
 
 
 async def setup(bot: TempVCBot) -> None:

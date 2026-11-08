@@ -69,7 +69,7 @@ The number in the link, `286313488`, stands for exactly these eight permissions:
 | **View Channels** | To see the hub, the category and the temporary channels. |
 | **Manage Channels** | To create, rename, set limits on and delete temporary channels. |
 | **Manage Roles** | To control who can connect, which is how Lock works. On a channel, Discord calls this same permission "Manage Permissions". The bot never edits your server's roles. |
-| **Connect** | To join temporary channels. Discord also won't let anyone edit a voice channel they can't connect to. |
+| **Connect** | The bot never joins voice, but Discord won't let anyone edit a voice channel they can't connect to. Without this, the bot couldn't manage a locked channel. |
 | **Move Members** | To move people from the hub into their channel. |
 | **Send Messages** | To post the control panel, timer and extension question. |
 | **Embed Links** | To show the control panel and timer as embeds. |
@@ -159,7 +159,7 @@ You can share this section with your server.
 | Control | What it does |
 |---|---|
 | **Rename** | Opens a form for a new name, of 1 to 100 characters. Discord allows about 2 renames per 10 minutes on each channel. If you reach that limit, the bot tells you when to try again. |
-| **User limit** | Opens a form for a number from 0 to 99, where 0 means no limit. The number counts people only, because the bot adds a seat for itself. |
+| **User limit** | Opens a form for a number from 0 to 99, where 0 means no limit. The number counts people only. If another bot, such as a music bot, joins, the bot adds a seat for it. |
 | **Locked / Unlocked** | Shows the current state, and switches it when clicked. While locked, new people can't join, but you can still get back in and people already inside stay. |
 | **Set timer length** | Choose 20, 25, 30, 35 or 40 minutes. The default is 20. You can only change this before the timer starts. |
 
@@ -193,16 +193,16 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 **Creating a channel**
 
 - [ ] Join the hub. You're moved into a new channel named after you, in the right category.
-- [ ] The bot appears in your channel, shown as deafened.
+- [ ] The bot doesn't join your channel. Only you are listed in it.
 - [ ] The control panel and a timer saying "Waiting for someone to join…", with a full grey ring, appear in the text chat.
 - [ ] Join the hub again. You go back to the same channel, and no new one appears.
-- [ ] With the bot still in your channel, have your friend join the hub. They get their own channel, the bot stays in yours, and their buttons still work.
+- [ ] Have your friend join the hub. They get their own channel, the bot doesn't join it either, and their buttons work.
 
 **Controls**
 
 - [ ] **Rename:** rename the channel. The name changes.
 - [ ] **Rename limit:** rename it two more times quickly. The third rename tells you to try again later.
-- [ ] **Limit:** set a limit of 2. The channel shows 3 seats, one being the bot's. You and one friend can join, and a third person can't.
+- [ ] **Limit:** set a limit of 2. The channel shows 2 seats. You and one friend can join, and a third person can't.
 - [ ] **Limit:** type `abc`. You get a private error message.
 - [ ] **Lock:** click the lock button. The label changes to Locked. Your friend can't join from outside, but you can leave and come back through the hub.
 - [ ] **Unlock:** click it again. Your friend can join.
@@ -224,7 +224,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 **Cleanup**
 
-- [ ] **Empty channel:** create a channel and leave it. It's deleted right away, and the bot leaves voice.
+- [ ] **Empty channel:** create a channel and leave it. It's deleted right away.
 - [ ] **Restart:** create a channel, press Ctrl+C in the terminal, and start the bot again. The old channel is deleted, and the hub is still there.
 
 ## Troubleshooting
@@ -257,22 +257,6 @@ If there's no message at all, make sure you restarted the bot after editing `.en
 - **The log names them.** `The bot is missing these permissions in the category: ...` lists exactly what's missing. Use the invite link from Step 3 again to fix them, and keep every permission ticked. You don't need to remove the bot first.
 - **A category or channel can override the server's settings.** If the log still shows missing permissions after that, open the category's **Edit Category**, then **Permissions**, and check that nothing denies those permissions to the bot's role or to `@everyone`.
 - **Your server requires two-factor authentication (2FA) for moderator actions?** Then [the account that owns the bot needs 2FA turned on too](https://docs.discord.com/developers/topics/permissions), or Discord refuses the Manage Channels and Manage Roles actions.
-
-### The bot can't join voice
-
-The channel still works without the bot in it, so this isn't urgent. The log says `Could not join voice channel` and gives a reason.
-
-- **Is the bot already in another temp VC?** That's normal, not an error. A bot can only be in one voice channel per server. See the [README](README.md#2-a-bot-can-only-be-in-one-voice-channel-per-server).
-- **Check the voice libraries.** Run this command:
-  ```
-  uv run python -m discord --version
-  ```
-  It should list `davey`, which Discord's required voice encryption depends on. If the error mentions `4017` or `davey`, or a newer `davey` may help, run:
-  ```
-  uv lock --upgrade-package discord-py --upgrade-package davey
-  uv sync
-  ```
-- **A timeout?** Your network may block the voice connection, which uses UDP. This is common on school and office networks. Try another network or a server.
 
 ### Other problems
 

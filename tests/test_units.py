@@ -174,9 +174,9 @@ class TestSeats:
         [
             (0, 0, 0),  # No limit stays no limit...
             (0, 1, 0),  # ...even with a bot in the channel.
-            (5, 0, 5),  # The bot isn't in the channel, so there's no extra seat.
-            (5, 1, 6),  # The bot is in the channel, so it gets its own seat.
-            (5, 2, 7),  # Another bot (say, a music bot) also gets its own.
+            (5, 0, 5),  # No bot in the channel, so there's no extra seat.
+            (5, 1, 6),  # A bot (say, a music bot) gets its own seat.
+            (5, 2, 7),  # So does each further bot.
             (98, 1, 99),  # This just fits.
             (99, 0, 99),
             (99, 1, 99),  # Discord's maximum wins, so 98 people fit.
