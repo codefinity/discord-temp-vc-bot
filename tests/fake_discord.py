@@ -93,8 +93,12 @@ class InteractionRecord:
     id: int
     token: str
     message_id: int | None
+    channel_id: int
     responses: list[dict[str, Any]] = field(default_factory=list)
     followups: list[dict[str, Any]] = field(default_factory=list)
+    # The new message the bot posted as its reply, if it replied with one rather
+    # than by editing the clicked message. Its buttons can be clicked in turn.
+    reply: dict[str, Any] | None = None
 
     @property
     def acknowledged(self) -> bool:
@@ -452,7 +456,7 @@ class FakeDiscord:
     ) -> InteractionRecord:
         interaction_id = self.next_id()
         token = f"interaction-token-{interaction_id}"
-        record = InteractionRecord(interaction_id, token, int(message["id"]))
+        record = InteractionRecord(interaction_id, token, int(message["id"]), int(message["channel_id"]))
         self.interactions[token] = record
         channel = self.channels[int(message["channel_id"])]
         await self._dispatch(
@@ -834,15 +838,19 @@ class FakeDiscord:
         if record.acknowledged:
             return _error(400, 40060, "Interaction has already been acknowledged.")
         record.responses.append(body)
-        if body["type"] == 7 and record.message_id in self.messages:  # Update the clicked message.
-            self._apply_edit(self.messages[record.message_id], body.get("data", {}))
         data = body.get("data") or {}
+        clicked = self._interaction_message(record.message_id)
+        if body["type"] == 7 and clicked is not None:  # Update the clicked message.
+            self._apply_edit(clicked, data)
+        reply_id = self.next_id()
+        if body["type"] == 4:  # A new message in reply. Ephemeral ones send no MESSAGE_CREATE.
+            record.reply = {**self._message_payload(record.channel_id, data), "id": str(reply_id)}
         return _json(
             {
                 "interaction": {
                     "id": str(record.id),
                     "type": 3,
-                    "response_message_id": str(self.next_id()),
+                    "response_message_id": str(reply_id),
                     "response_message_loading": body["type"] == 5,
                     "response_message_ephemeral": bool(data.get("flags", 0) & EPHEMERAL_FLAG),
                 }
@@ -863,9 +871,19 @@ class FakeDiscord:
 
     async def _interaction_edit_original(self, request: web.Request, body: dict[str, Any]) -> web.Response:
         record = self.interactions[request.match_info["token"]]
-        message = self.messages[record.message_id]  # type: ignore[index]
+        # "Original" means the bot's reply if it posted one, otherwise the clicked message.
+        message = record.reply or self._interaction_message(record.message_id)
+        if message is None:
+            return _error(404, 10008, "Unknown Message")
         self._apply_edit(message, body)
         return _json(message)
+
+    def _interaction_message(self, message_id: int | None) -> dict[str, Any] | None:
+        """A channel message, or a reply the bot posted to an earlier click."""
+        if message_id in self.messages:
+            return self.messages[message_id]
+        replies = (record.reply for record in self.interactions.values() if record.reply is not None)
+        return next((reply for reply in replies if int(reply["id"]) == message_id), None)
 
 
 def _json(data: Any, *, status: int = 200, headers: dict[str, str] | None = None) -> web.Response:

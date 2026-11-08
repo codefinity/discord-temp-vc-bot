@@ -162,6 +162,7 @@ You can share this section with your server.
 | **User limit** | Opens a form for a number from 0 to 99, where 0 means no limit. The number counts people only. If another bot, such as a music bot, joins, the bot adds a seat for it. |
 | **Locked / Unlocked** | Shows the current state, and switches it when clicked. While locked, new people can't join, but you can still get back in and people already inside stay. |
 | **Set timer length** | Choose 20, 25, 30, 35 or 40 minutes. The default is 20. You can only change this before the timer starts. |
+| **End discussion** | Ends the channel early. The bot privately asks you to confirm: **End now** deletes the channel and disconnects everyone, and **Keep it open** cancels. If you don't answer within a minute, nothing happens. Works at any time, even before the timer starts. |
 
 **The timer:**
 
@@ -177,7 +178,7 @@ You can share this section with your server.
 - **No** closes the channel.
 - **No answer within 2 minutes** closes the channel.
 
-**When a channel closes,** everyone in it is disconnected and the channel is deleted. This also happens the moment the last person leaves, whatever the timer says.
+**When a channel closes,** everyone in it is disconnected and the channel is deleted. This also happens the moment the last person leaves, or when you end the discussion, whatever the timer says.
 
 ## Test checklist
 
@@ -207,6 +208,9 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 - [ ] **Lock:** click the lock button. The label changes to Locked. Your friend can't join from outside, but you can leave and come back through the hub.
 - [ ] **Unlock:** click it again. Your friend can join.
 - [ ] **Owner only:** have your friend click any button. They get the private "Only the channel owner can do this."
+- [ ] **End, cancelled:** click End discussion. Only you see the question. Click Keep it open. The channel stays and the timer keeps going.
+- [ ] **End, no answer:** click End discussion and wait a minute. The question's buttons disappear, and the channel stays.
+- [ ] **End:** with your friend in the channel, click End discussion, then End now. The channel is deleted and you're both disconnected. Joining the hub gives you a new channel.
 
 **Timer**
 

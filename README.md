@@ -2,7 +2,7 @@
 
 A Discord bot that gives each member their own voice channel on a timer.
 
-A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The bot never joins a voice channel itself. It manages each one through its permissions.
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
 
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
@@ -33,20 +33,22 @@ temp-vc-bot/
 │   │   └── timer.py            Countdown, extension, auto-close
 │   └── views/
 │       ├── owner_only.py       Shared owner-only check (added)
-│       ├── control_panel.py    Rename, limit, lock and timer controls
+│       ├── control_panel.py    Rename, limit, lock, timer and end controls
 │       ├── modals.py           Rename and user limit forms
-│       └── extend_prompt.py    Yes and No extension buttons
+│       ├── extend_prompt.py    Yes and No extension buttons
+│       └── end_confirm.py      "End now?" question before ending early (added)
 └── tests/                      Automated tests (added)
     ├── fake_discord.py         A stand-in for Discord's servers
     ├── test_end_to_end.py      The real bot against the stand-in
     └── test_units.py           Small pieces on their own
 ```
 
-**Four additions to the suggested layout:**
+**Five additions to the suggested layout:**
 
 - `errors.py`: the buttons, forms and event handlers all need the same friendly messages, so they live in one place.
 - `countdown_ring.py`: Discord embeds can't draw shapes, so the circular countdown is a picture. This file only draws it. `timer.py` decides what it shows and when.
 - `views/owner_only.py`: the control panel and the extension prompt share one owner check. It has to be written a particular way (see the comment in that file), so one copy is safer than two.
+- `views/end_confirm.py`: the End discussion button wasn't in the brief. Ending a channel early can't be undone, so the button asks the owner to confirm first, and that question lives here.
 - `tests/`: lets you check a change without a live server. The bot doesn't need these files to run.
 
 ## Where the brief and Discord disagree
@@ -118,6 +120,7 @@ The brief left these open. Each one is easy to change.
 - Besides the four permissions in its overwrite, the bot also gives itself Send Messages, Embed Links and Attach Files on each channel, so a category's settings can't stop it posting the panel or the countdown ring.
 - The lock button's label shows the state and the action, such as "Unlocked (click to lock)", so nobody reads "Locked" as a command.
 - Setting a limit lower than the number of people inside removes nobody. It only stops new people joining.
+- **End discussion** lets the owner delete the channel before time runs out. Ending can't be undone and disconnects everyone, so the button only asks a private "End now?" question first. An unanswered question expires after 60 seconds (`END_CONFIRM_SECONDS`) and leaves the channel alone. The button works in every phase, including before the timer starts.
 - Names have spaces trimmed from both ends. Renaming a channel to its current name does nothing, so it doesn't use up a rename.
 
 **Server setup**
