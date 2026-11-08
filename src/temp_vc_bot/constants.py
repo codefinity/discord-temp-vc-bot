@@ -59,6 +59,7 @@ MAX_USER_LIMIT = 99  # The most seats a voice channel can have.
 # the owner to try later. discord.py does not allow a value below 30.
 MAX_RATE_LIMIT_WAIT_SECONDS = 90.0
 HUB_NOTICE_SECONDS = 30  # How long an error notice stays in the hub's chat.
+END_CONFIRM_SECONDS = 60  # How long the owner has to confirm ending the channel early.
 MODAL_TIMEOUT_SECONDS = 15 * 60  # Discord's interaction tokens last 15 minutes.
 DELETE_ATTEMPTS = 3  # Tries at deleting a channel while being rate limited.
 
@@ -79,6 +80,9 @@ UNLOCKED_LABEL = "Unlocked (click to lock)"
 TIMER_PLACEHOLDER = "Set timer length"
 YES_LABEL = "Yes"
 NO_LABEL = "No"
+END_LABEL = "End discussion"
+END_CONFIRM_LABEL = "End now"
+END_CANCEL_LABEL = "Keep it open"
 
 # ---------------------------------------------------------------------------
 # Messages shown to people
@@ -86,6 +90,10 @@ NO_LABEL = "No"
 NOT_OWNER_MESSAGE = "Only the channel owner can do this."
 WAITING_MESSAGE = "Waiting for someone to join…"
 EXTEND_QUESTION = f"Time's up! Extend by {EXTENSION_MINUTES} minutes?"
+END_QUESTION = "End the discussion now? This channel will be deleted and everyone in it disconnected."
+ENDING_MESSAGE = "👋 Ending the discussion. This channel is being deleted."
+END_CANCELLED_MESSAGE = "👍 The channel stays open."
+END_EXPIRED_MESSAGE = "No answer, so the channel stays open. Click End discussion again if you still want to end it."
 TIMER_ALREADY_STARTED_MESSAGE = "The timer has already started, so its length can't be changed."
 INVALID_NAME_MESSAGE = f"Please enter a name with {MIN_CHANNEL_NAME_LENGTH}–{MAX_CHANNEL_NAME_LENGTH} characters."
 REJECTED_NAME_MESSAGE = "Discord rejected that name. Please try a different one."

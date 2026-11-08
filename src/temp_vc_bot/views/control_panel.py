@@ -7,6 +7,8 @@ import logging
 import discord
 
 from ..constants import (
+    END_LABEL,
+    END_QUESTION,
     LOCKED_LABEL,
     NO_USER_LIMIT,
     RENAME_LABEL,
@@ -19,6 +21,7 @@ from ..constants import (
 from ..errors import API_ERRORS
 from ..services.channel_manager import ChannelManager
 from ..state import TempVCSession
+from .end_confirm import EndConfirmView
 from .modals import RenameModal, UserLimitModal
 from .owner_only import OwnerOnlyView
 
@@ -34,7 +37,7 @@ def _timer_options(selected_minutes: int) -> list[discord.SelectOption]:
 
 
 class ControlPanelView(OwnerOnlyView):
-    """The owner's rename, user limit, lock and timer controls."""
+    """The owner's rename, user limit, lock, timer and end controls."""
 
     def __init__(self, channels: ChannelManager, session: TempVCSession) -> None:
         # timeout=None keeps the controls working for as long as the channel exists.
@@ -109,7 +112,7 @@ class ControlPanelView(OwnerOnlyView):
         self._sync_with_session()
         await interaction.edit_original_response(embed=self.build_embed(), view=self)
 
-    @discord.ui.select(placeholder=TIMER_PLACEHOLDER, options=_timer_options(TIMER_CHOICES[0]), row=1)
+    @discord.ui.select(placeholder=TIMER_PLACEHOLDER, options=_timer_options(TIMER_CHOICES[0]), row=2)
     async def timer_select(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
         """Choose the timer's length. This only works before the timer starts."""
         # The dropdown is disabled when the timer starts, but someone's screen can
@@ -120,3 +123,11 @@ class ControlPanelView(OwnerOnlyView):
         self.session.timer_minutes = int(select.values[0])
         self._sync_with_session()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    # On its own row between the buttons and the dropdown, away from the lock button,
+    # which also turns red when locked.
+    @discord.ui.button(label=END_LABEL, emoji="🛑", style=discord.ButtonStyle.danger, row=1)
+    async def end_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        """Ask the owner, privately, to confirm ending the channel before its time is up."""
+        confirm = EndConfirmView(self.channels, self.session, interaction)
+        await interaction.response.send_message(END_QUESTION, view=confirm, ephemeral=True)

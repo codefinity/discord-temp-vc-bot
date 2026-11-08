@@ -16,7 +16,7 @@ from temp_vc_bot import constants, countdown_ring
 from temp_vc_bot.bot import TempVCBot
 from temp_vc_bot.services import timer
 from temp_vc_bot.state import TimerPhase
-from temp_vc_bot.views import extend_prompt
+from temp_vc_bot.views import end_confirm, extend_prompt
 
 from .conftest import BotStarter
 from .fake_discord import (
@@ -24,6 +24,7 @@ from .fake_discord import (
     BOT_USER_ID,
     CATEGORY_ID,
     CONNECT,
+    EPHEMERAL_FLAG,
     EVERYONE_ROLE_ID,
     GUILD_ID,
     HUB_ID,
@@ -219,7 +220,7 @@ class TestControlPanelAccess:
         assert world.panel_message(channel_id)["channel_id"] == str(channel_id)
         assert world.panel_message(channel_id)["embeds"]
 
-    @pytest.mark.parametrize("label", ["Rename", "User limit", "Unlocked (click to lock)"])
+    @pytest.mark.parametrize("label", ["Rename", "User limit", "Unlocked (click to lock)", "End discussion"])
     async def test_non_owner_clicking_a_button_gets_only_a_private_reply(self, world: FakeDiscord, bot: TempVCBot, label: str) -> None:
         _, channel_id = await make_vc(world)
         stranger = world.add_member("Mallory")
@@ -227,6 +228,7 @@ class TestControlPanelAccess:
         assert record.private_texts() == [NOT_OWNER]
         assert record.public_texts() == []
         assert int((world.overwrite_on(channel_id, EVERYONE_ROLE_ID) or {"deny": 0})["deny"]) == 0
+        assert channel_id in world.channels
 
     async def test_non_owner_using_the_dropdown_changes_nothing(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
@@ -914,6 +916,89 @@ class TestCleanup:
         await world.settle()
         assert channel_id not in world.channels
         assert task.done()
+        assert "Traceback" not in caplog.text
+
+
+async def ask_to_end(world: FakeDiscord, owner: int, channel_id: int) -> dict[str, Any]:
+    """The owner clicks End discussion. Returns the private question it brings up."""
+    record = await world.click(owner, world.panel_message(channel_id), "End discussion")
+    assert record.reply is not None, "Clicking End discussion should ask a question."
+    return record.reply
+
+
+class TestEndEarly:
+    async def test_end_button_sits_above_the_dropdown(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        _, channel_id = await make_vc(world)
+        rows = world.panel_message(channel_id)["components"]
+        layout = [[component.get("label") or component["type"] for component in row["components"]] for row in rows]
+        assert layout == [["Rename", "User limit", "Unlocked (click to lock)"], ["End discussion"], [3]]
+
+    async def test_ending_asks_the_owner_privately_first(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # A click on the panel alone would be too easy to make by mistake.
+        owner, channel_id = await make_vc(world)
+        question = await ask_to_end(world, owner, channel_id)
+        assert question["flags"] & EPHEMERAL_FLAG
+        assert question["content"] == constants.END_QUESTION
+        assert [button["label"] for button in _buttons(question)] == ["End now", "Keep it open"]
+        assert channel_id in world.channels
+
+    async def test_confirming_deletes_the_channel_and_disconnects_everyone(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        friend = world.add_member("Bob")
+        await world.join_voice(friend, channel_id)
+        await world.settle()
+        task = bot.sessions.by_owner(owner).timer_task
+        question = await ask_to_end(world, owner, channel_id)
+        await world.click(owner, question, "End now")
+        assert channel_id not in world.channels
+        assert owner not in world.voice and friend not in world.voice
+        assert task.done(), "The countdown must stop with the channel."
+        assert question["content"] == constants.ENDING_MESSAGE
+        assert question["components"] == []
+
+    async def test_owner_can_get_a_new_channel_after_ending_one(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await world.click(owner, await ask_to_end(world, owner, channel_id), "End now")
+        assert bot.sessions.by_owner(owner) is None
+        await world.join_voice(owner, HUB_ID)
+        await world.settle()
+        assert world.voice[owner] == int(world.only_temp_channel()["id"])
+
+    async def test_ending_before_anyone_joins_works_too(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        assert not bot.sessions.by_owner(owner).timer_started
+        await world.click(owner, await ask_to_end(world, owner, channel_id), "End now")
+        assert channel_id not in world.channels
+
+    async def test_keep_it_open_changes_nothing(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.settle()
+        session = bot.sessions.by_owner(owner)
+        question = await ask_to_end(world, owner, channel_id)
+        await world.click(owner, question, "Keep it open")
+        assert channel_id in world.channels
+        assert session.phase is TimerPhase.RUNNING
+        assert not session.timer_task.done()
+        assert question["content"] == constants.END_CANCELLED_MESSAGE
+        assert question["components"] == []
+
+    async def test_an_unanswered_question_expires_and_keeps_the_channel(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(end_confirm, "END_CONFIRM_SECONDS", 0.2)
+        owner, channel_id = await make_vc(world)
+        question = await ask_to_end(world, owner, channel_id)
+        # The buttons are removed, so nobody clicks one that no longer works.
+        await world.wait_for(lambda: question["components"] == [])
+        assert question["content"] == constants.END_EXPIRED_MESSAGE
+        assert channel_id in world.channels
+
+    @pytest.mark.usefixtures("time_to_answer")
+    async def test_ending_while_the_extension_question_is_open_closes_cleanly(self, world: FakeDiscord, bot: TempVCBot, caplog: pytest.LogCaptureFixture) -> None:
+        owner, channel_id, _ = await run_to_prompt(world, bot)
+        task = bot.sessions.by_owner(owner).timer_task
+        await world.click(owner, await ask_to_end(world, owner, channel_id), "End now")
+        assert channel_id not in world.channels
+        await world.wait_for(task.done)
         assert "Traceback" not in caplog.text
 
 
