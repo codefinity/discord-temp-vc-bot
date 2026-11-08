@@ -50,7 +50,11 @@ class TempVCSession:
     timer_message_id: int | None = None
     panel_view: ControlPanelView | None = None
     timer_task: asyncio.Task[None] | None = None
-    # Taken while editing the timer message, so edits go out one at a time.
+    # Moves the timer back to the bottom of the chat after people post below it.
+    repost_task: asyncio.Task[None] | None = None
+    # True when something was posted below the timer that no repost has covered yet.
+    timer_buried: bool = False
+    # Taken while editing or reposting the timer message, so changes go out one at a time.
     timer_message_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Stays False until the owner has been moved in and the messages are posted.
     # Until then the channel is empty because it is new, not because everyone left.
@@ -84,10 +88,11 @@ class TempVCSession:
         self.ends_at += minutes_to_delta(EXTENSION_MINUTES)
 
     def stop_background_work(self) -> None:
-        """Cancel the timer and stop listening for button clicks on the panel."""
-        # A task must not cancel itself, or it would stop before deleting the channel.
-        if self.timer_task is not None and self.timer_task is not asyncio.current_task():
-            self.timer_task.cancel()
+        """Cancel the timer and its reposts, and stop listening for button clicks on the panel."""
+        for task in (self.timer_task, self.repost_task):
+            # A task must not cancel itself, or it would stop before deleting the channel.
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
         if self.panel_view is not None:
             self.panel_view.stop()
 

@@ -107,6 +107,8 @@ The brief left these open. Each one is easy to change.
 - The text above the ring shows the time the channel closes, in each person's own time zone, rather than a live countdown. Discord updates a live countdown every second, and that made the ring flicker. Now nothing in the timer message changes between the bot's once-a-minute redraws.
 - The minutes in the ring are rounded up, so it shows 1 during the last minute and 0 only when time is up.
 - If the ring can't be drawn, the timer carries on with text only, and the error is logged.
+- The timer stays at the bottom of the chat. Discord can't keep a message on screen, and a pinned message only shows in the pins list. So when anything is posted below the timer, the bot waits 5 seconds (`TIMER_REPOST_DELAY_SECONDS`), posts the timer again at the bottom and deletes the old one. Everything posted during the wait is covered by one repost, so a busy chat doesn't flood the channel. This includes the bot's extension prompt, so the timer ends up just below it.
+- To hear about new messages, the bot asks for Discord's message events. It never reads what people write, so it doesn't need the privileged Message Content intent.
 
 **Ownership**
 

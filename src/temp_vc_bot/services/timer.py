@@ -18,6 +18,7 @@ from ..constants import (
     EXTEND_QUESTION,
     EXTENSION_MINUTES,
     RING_REDRAW_MINUTES,
+    TIMER_REPOST_DELAY_SECONDS,
     WAITING_MESSAGE,
     minutes_to_delta,
 )
@@ -139,7 +140,7 @@ class TimerService:
         self.channels = channels
 
     async def post_timer_message(self, session: TempVCSession, channel: discord.VoiceChannel) -> None:
-        """Post the timer embed and its ring for the first time."""
+        """Post the timer embed and its ring at the bottom of the chat."""
         ring = await draw_ring(session, discord.utils.utcnow())
         embed = build_timer_embed(session, with_ring=ring is not None)
         message = await channel.send(embed=embed, files=[ring] if ring else [])
@@ -186,6 +187,58 @@ class TimerService:
                 await message.edit(embed=embed, attachments=[ring] if ring else [])
             except API_ERRORS as error:
                 log.warning("Could not update the timer message in channel %s: %s", session.channel_id, error)
+
+    # ----- Keeping the timer in view ----------------------------------------
+    # Discord has no way to keep a message on screen. A pinned message only shows
+    # in the pins list, so instead the bot posts the timer again below the chat.
+
+    def note_new_message(self, session: TempVCSession, message_id: int) -> None:
+        """Note that something was posted in the channel, which may have pushed the timer up.
+
+        After TIMER_REPOST_DELAY_SECONDS the timer is posted again at the bottom.
+        """
+        if session.closed or session.timer_message_id is None or message_id == session.timer_message_id:
+            return
+        session.timer_buried = True
+        if session.repost_task is None or session.repost_task.done():
+            session.repost_task = asyncio.create_task(
+                self._keep_timer_at_bottom(session), name=f"repost-{session.channel_id}"
+            )
+
+    async def _keep_timer_at_bottom(self, session: TempVCSession) -> None:
+        """Repost the timer after a pause, and again while people keep posting below it."""
+        while session.timer_buried:
+            await asyncio.sleep(TIMER_REPOST_DELAY_SECONDS)
+            # Cleared before reposting, so a message posted during the repost
+            # brings another round.
+            session.timer_buried = False
+            await self._repost_timer_message(session)
+
+    async def _repost_timer_message(self, session: TempVCSession) -> None:
+        """Post the timer again at the bottom of the chat, then delete the old one.
+
+        The new one goes up first, so the timer never disappears. If posting
+        fails, the old one stays and keeps being updated.
+        """
+        async with session.timer_message_lock:
+            channel = self.channels.get_channel(session)
+            old_id = session.timer_message_id
+            if session.closed or channel is None or old_id is None:
+                return
+            # Nothing has been posted below it since. This happens when Discord
+            # reports the bot's own repost before replying to the post itself, so
+            # the repost looked like someone else's message for a moment.
+            if channel.last_message_id == old_id:
+                return
+            try:
+                await self.post_timer_message(session, channel)
+            except API_ERRORS as error:
+                log.warning("Could not move the timer down in channel %s: %s", session.channel_id, error)
+                return
+            try:
+                await channel.get_partial_message(old_id).delete()
+            except API_ERRORS as error:
+                log.warning("Could not delete the old timer message in channel %s: %s", session.channel_id, error)
 
     async def _run(self, session: TempVCSession) -> None:
         """Count down, then close the channel. Runs as a background task."""

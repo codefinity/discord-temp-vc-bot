@@ -21,6 +21,12 @@ ANSWER_WINDOW_MINUTES = 2  # How long the owner has to answer the prompt.
 # change. Lower it for a smoother ring with more blurred moments, e.g. 0.25 for
 # every 15 seconds. Discord allows about 5 edits per 5 seconds in a channel.
 RING_REDRAW_MINUTES = 1
+# When people chat below the timer, the bot waits this many seconds, then posts
+# the timer again at the bottom of the chat and deletes the old one, so it stays
+# in view. Anything posted during the wait is covered by the same repost, so a busy
+# chat costs one repost per wait, not one per message. Each repost is a new picture,
+# so a shorter wait also means more blurred previews.
+TIMER_REPOST_DELAY_SECONDS = 5
 
 # These two are worked out from the values above, so they stay correct.
 MAX_LIFETIME_MINUTES = MAX_TIMER_MINUTES + EXTENSION_MINUTES
@@ -28,7 +34,8 @@ TIMER_CHOICES = tuple(range(MIN_TIMER_MINUTES, MAX_TIMER_MINUTES + 1, TIMER_STEP
 
 # How many real seconds one "minute" above lasts. Keep this at 60 in real use.
 # Lower it to test the timer quickly: at 6, everything runs ten times faster.
-SECONDS_PER_MINUTE = 60
+#SECONDS_PER_MINUTE = 60
+SECONDS_PER_MINUTE = 4
 
 
 def minutes_to_delta(minutes: float) -> timedelta:

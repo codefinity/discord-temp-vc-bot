@@ -216,8 +216,8 @@ class TestRegistry:
 
 
 class TestIntentsAndInvite:
-    def test_only_guilds_and_voice_states_are_requested(self) -> None:
-        assert build_intents() == discord.Intents(guilds=True, voice_states=True)
+    def test_only_guilds_voice_states_and_guild_messages_are_requested(self) -> None:
+        assert build_intents() == discord.Intents(guilds=True, voice_states=True, guild_messages=True)
 
     def test_no_privileged_intents(self) -> None:
         intents = build_intents()

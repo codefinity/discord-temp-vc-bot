@@ -1,4 +1,4 @@
-"""React to people joining and leaving voice channels."""
+"""React to people joining and leaving voice channels, and to chat in temp VCs."""
 
 from __future__ import annotations
 
@@ -133,6 +133,15 @@ class VoiceEvents(commands.Cog):
         session = self.sessions.by_channel(channel.id)
         if session is not None:
             await self.channels.close_session(session, "the channel was deleted by someone else")
+
+    # ----- Chat -------------------------------------------------------------
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Keep the timer at the bottom of a temp VC's chat as messages arrive."""
+        session = self.sessions.by_channel(message.channel.id)
+        if session is not None:
+            self.timers.note_new_message(session, message.id)
 
     # ----- The hub ----------------------------------------------------------
 
