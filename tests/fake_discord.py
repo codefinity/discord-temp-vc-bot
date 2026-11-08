@@ -11,6 +11,8 @@ Discord's documentation:
 - A locked or full channel refuses people, unless they have Move Members.
 - Moving someone who isn't in voice fails.
 - A channel can be renamed about twice per 10 minutes, then Discord answers 429.
+- Uploading a file needs Attach Files. An edit's attachment list replaces the
+  message's attachments: old ones not listed are removed.
 
 It does not handle voice audio. FakeVoiceClient stands in for that part, which is
 why a real voice connection can only be checked on a real server.
@@ -34,6 +36,7 @@ MANAGE_CHANNELS = 1 << 4
 VIEW_CHANNEL = 1 << 10
 SEND_MESSAGES = 1 << 11
 EMBED_LINKS = 1 << 14
+ATTACH_FILES = 1 << 15
 READ_MESSAGE_HISTORY = 1 << 16
 CONNECT = 1 << 20
 SPEAK = 1 << 21
@@ -41,7 +44,7 @@ MOVE_MEMBERS = 1 << 24
 MANAGE_ROLES = 1 << 28
 
 # The exact number in the invite link in DEPLOYMENT.md.
-INVITE_PERMISSIONS = 286280720
+INVITE_PERMISSIONS = 286313488
 EVERYONE_PERMISSIONS = VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | READ_MESSAGE_HISTORY | CONNECT | SPEAK
 
 GUILD_ID = 1000
@@ -57,6 +60,9 @@ RENAMES_ALLOWED = 2
 RENAME_RETRY_AFTER_SECONDS = 540.0
 
 EPHEMERAL_FLAG = 64
+
+# Files uploaded with a request, as {index: (filename, bytes)}.
+UPLOADS = web.RequestKey("uploads", dict)
 
 
 class FakeVoiceClient(discord.VoiceProtocol):
@@ -118,6 +124,7 @@ class FakeDiscord:
         self.bot_voice_flags: dict[str, bool] = {}
         self.bot_left_voice_itself = False  # True if it left, rather than being disconnected.
         self.messages: dict[int, dict[str, Any]] = {}
+        self.uploaded_files: dict[str, bytes] = {}  # Attachment ID -> the file's bytes.
         self.interactions: dict[str, InteractionRecord] = {}
         self.requests: list[tuple[str, str, dict[str, Any]]] = []
         self.identify: dict[str, Any] | None = None
@@ -340,6 +347,12 @@ class FakeDiscord:
     def timer_message(self, channel_id: int) -> dict[str, Any]:
         return next(m for m in self.messages_in(channel_id) if m["embeds"] and "Timer" in m["embeds"][0].get("title", ""))
 
+    def timer_ring(self, channel_id: int) -> bytes:
+        """The image currently attached to the timer message."""
+        attachments = self.timer_message(channel_id)["attachments"]
+        assert len(attachments) == 1, f"Expected one image on the timer, found {len(attachments)}."
+        return self.uploaded_files[attachments[0]["id"]]
+
     def prompt_message(self, channel_id: int) -> dict[str, Any] | None:
         for message in self.messages_in(channel_id):
             if "Time's up! Extend" in message["content"]:
@@ -504,7 +517,7 @@ class FakeDiscord:
 
     def _logged(self, handler: Any) -> Any:
         async def wrapper(request: web.Request) -> web.StreamResponse:
-            body = await request.json() if request.can_read_body else {}
+            body = await self._read_body(request)
             self.requests.append((request.method, request.path, body))
             if not request.path.startswith(("/api/v10/interactions", "/api/v10/webhooks")):
                 if request.headers.get("Authorization") != f"Bot {TOKEN}":
@@ -512,6 +525,49 @@ class FakeDiscord:
             return await handler(request, body)
 
         return wrapper
+
+    @staticmethod
+    async def _read_body(request: web.Request) -> dict[str, Any]:
+        """Read a JSON body, or a multipart one carrying files.
+
+        With files, discord.py sends the JSON as a "payload_json" part and each file
+        as "files[0]", "files[1]" and so on. The files are kept on the request.
+        """
+        request[UPLOADS] = {}
+        if not request.can_read_body:
+            return {}
+        if request.content_type != "multipart/form-data":
+            return await request.json()
+        form = await request.post()
+        body = json.loads(str(form["payload_json"]))
+        for name, part in form.items():
+            if isinstance(part, web.FileField):
+                index = int(name.removeprefix("files[").removesuffix("]"))
+                request[UPLOADS][index] = (part.filename, part.file.read())
+        return body
+
+    def _attachments_after(
+        self, request: web.Request, listed: list[dict[str, Any]], current: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """A message's attachments after a create or edit, the way Discord's API v10 works them out.
+
+        Each listed entry is either an attachment the message already has, by its
+        ID, or a new upload, by its index among the uploaded files. Anything not
+        listed is removed.
+        """
+        existing = {attachment["id"]: attachment for attachment in current}
+        uploads: dict[int, tuple[str, bytes]] = request[UPLOADS]
+        result = []
+        for entry in listed:
+            if str(entry["id"]) in existing:
+                result.append(existing[str(entry["id"])])
+                continue
+            filename, data = uploads[int(entry["id"])]
+            attachment_id = str(self.next_id())
+            self.uploaded_files[attachment_id] = data
+            url = f"https://cdn.fake/{attachment_id}/{filename}"
+            result.append({"id": attachment_id, "filename": filename, "size": len(data), "url": url, "proxy_url": url})
+        return result
 
     async def _dispatch(self, event: str, data: dict[str, Any]) -> None:
         assert self._ws is not None, "The bot isn't connected."
@@ -729,7 +785,10 @@ class FakeDiscord:
         permissions = self.effective_permissions(channel_id, BOT_USER_ID)
         if not permissions & SEND_MESSAGES or (body.get("embeds") and not permissions & EMBED_LINKS):
             return _error(403, 50013, "Missing Permissions")
+        if request[UPLOADS] and not permissions & ATTACH_FILES:
+            return _error(403, 50013, "Missing Permissions")
         message = self._message_payload(channel_id, body)
+        message["attachments"] = self._attachments_after(request, body.get("attachments") or [], [])
         self.messages[int(message["id"])] = message
         return _json(message)
 
@@ -743,7 +802,11 @@ class FakeDiscord:
         message = self.messages.get(int(request.match_info["message_id"]))
         if message is None or int(message["channel_id"]) not in self.channels:
             return _error(404, 10008, "Unknown Message")
+        if request[UPLOADS] and not self.effective_permissions(int(message["channel_id"]), BOT_USER_ID) & ATTACH_FILES:
+            return _error(403, 50013, "Missing Permissions")
         self._apply_edit(message, body)
+        if "attachments" in body:
+            message["attachments"] = self._attachments_after(request, body["attachments"], message["attachments"])
         return _json(message)
 
     async def _delete_message(self, request: web.Request, body: dict[str, Any]) -> web.Response:

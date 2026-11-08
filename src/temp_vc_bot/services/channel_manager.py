@@ -31,6 +31,7 @@ REQUIRED_CATEGORY_PERMISSIONS = {
     "move_members": "Move Members",
     "send_messages": "Send Messages",
     "embed_links": "Embed Links",
+    "attach_files": "Attach Files",
 }
 # What the bot needs in the hub, to see people arrive and move them out.
 REQUIRED_HUB_PERMISSIONS = {
@@ -69,6 +70,7 @@ def _bot_overwrite(me: discord.Member) -> discord.PermissionOverwrite:
         move_members=True,
         send_messages=True,
         embed_links=True,
+        attach_files=True,  # For the countdown ring, which is an image.
     )
     # Discord only lets server administrators put "Manage Permissions" in a channel
     # overwrite. A bot without Administrator already has it on every channel through

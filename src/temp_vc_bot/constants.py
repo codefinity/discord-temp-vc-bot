@@ -15,6 +15,12 @@ TIMER_STEP_MINUTES = 5  # Gap between the dropdown choices.
 DEFAULT_TIMER_MINUTES = 20  # Used when the owner does not pick a length.
 EXTENSION_MINUTES = 10  # Added when the owner answers "Yes".
 ANSWER_WINDOW_MINUTES = 2  # How long the owner has to answer the prompt.
+# How often the countdown ring is redrawn. Every redraw is a new picture, and
+# Discord shows a blurred preview of each new picture until it has loaded. Once
+# a minute keeps those moments rare, and matches when the minutes in the middle
+# change. Lower it for a smoother ring with more blurred moments, e.g. 0.25 for
+# every 15 seconds. Discord allows about 5 edits per 5 seconds in a channel.
+RING_REDRAW_MINUTES = 1
 
 # These two are worked out from the values above, so they stay correct.
 MAX_LIFETIME_MINUTES = MAX_TIMER_MINUTES + EXTENSION_MINUTES

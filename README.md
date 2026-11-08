@@ -25,6 +25,7 @@ temp-vc-bot/
 │   ├── bot.py                  Creates the bot, sets intents, loads the cog
 │   ├── state.py                One channel's session, and the list of sessions
 │   ├── errors.py               Friendly error messages (added)
+│   ├── countdown_ring.py       Draws the circular countdown image (added)
 │   ├── cogs/
 │   │   └── voice_events.py     Hub joins, people joining and leaving, startup
 │   ├── services/
@@ -41,9 +42,10 @@ temp-vc-bot/
     └── test_units.py           Small pieces on their own
 ```
 
-**Three additions to the suggested layout:**
+**Four additions to the suggested layout:**
 
 - `errors.py`: the buttons, forms and event handlers all need the same friendly messages, so they live in one place.
+- `countdown_ring.py`: Discord embeds can't draw shapes, so the circular countdown is a picture. This file only draws it. `timer.py` decides what it shows and when.
 - `views/owner_only.py`: the control panel and the extension prompt share one owner check. It has to be written a particular way (see the comment in that file), so one copy is safer than two.
 - `tests/`: lets you check a change without a live server. The bot doesn't need these files to run.
 
@@ -100,6 +102,11 @@ The brief left these open. Each one is easy to change.
 - The maximum lifetime of 50 minutes counts from when the timer starts. A channel with only its owner in it has no timer, because of the start condition, so it stays open for as long as they stay.
 - The extra 10 minutes count from when the base time ended, not from when the owner clicked Yes. Otherwise, answering late would push the channel past 50 minutes. If the owner takes the full 2 minutes to answer, about 8 minutes remain.
 - If the bot can't post the extension prompt, for example because it lost permission, that counts as no answer and the channel closes.
+- The countdown is a ring that empties clockwise, with the minutes left in the middle. A fresh ring counts down each stretch: the base time (green), the 2-minute answer window (orange) and the extra time (blue).
+- The ring is redrawn once a minute (`RING_REDRAW_MINUTES`), when the minutes in the middle change. Every redraw is a new picture, and Discord shows a blurred preview of a new picture until it has loaded, so redrawing more often means more blurred moments. The bot can't turn that preview off.
+- The text above the ring shows the time the channel closes, in each person's own time zone, rather than a live countdown. Discord updates a live countdown every second, and that made the ring flicker. Now nothing in the timer message changes between the bot's once-a-minute redraws.
+- The minutes in the ring are rounded up, so it shows 1 during the last minute and 0 only when time is up.
+- If the ring can't be drawn, the timer carries on with text only, and the error is logged.
 
 **Ownership**
 
@@ -115,7 +122,7 @@ The brief left these open. Each one is easy to change.
 
 - The panel and the timer are two separate messages, so each can update on its own.
 - The panel message tags the owner, so they notice it. Anyone in the chat can see it.
-- Besides the four permissions in its overwrite, the bot also gives itself Send Messages and Embed Links on each channel, so a category's settings can't stop it posting the panel.
+- Besides the four permissions in its overwrite, the bot also gives itself Send Messages, Embed Links and Attach Files on each channel, so a category's settings can't stop it posting the panel or the countdown ring.
 - The lock button's label shows the state and the action, such as "Unlocked (click to lock)", so nobody reads "Locked" as a command.
 - Setting a limit lower than the number of people inside removes nobody. It only stops new people joining.
 - Names have spaces trimmed from both ends. Renaming a channel to its current name does nothing, so it doesn't use up a rename.
