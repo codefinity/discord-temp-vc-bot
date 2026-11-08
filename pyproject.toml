@@ -13,6 +13,9 @@ dependencies = [
     # voice encryption protocol since March 2026, and davey provides it. Support
     # for DAVE arrived in discord.py 2.7.0, so don't go below this version.
     "discord-py[voice]>=2.7.1",
+    # Draws the circular countdown. Its built-in scalable font means no font file
+    # has to be shipped with the bot.
+    "pillow>=13.0.0",
     "python-dotenv>=1.2.4",
 ]
 

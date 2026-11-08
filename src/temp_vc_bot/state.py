@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
 from typing import TYPE_CHECKING
@@ -50,6 +50,8 @@ class TempVCSession:
     timer_message_id: int | None = None
     panel_view: ControlPanelView | None = None
     timer_task: asyncio.Task[None] | None = None
+    # Taken while editing the timer message, so edits go out one at a time.
+    timer_message_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Stays False until the owner has been moved in and the messages are posted.
     # Until then the channel is empty because it is new, not because everyone left.
     setup_finished: bool = False

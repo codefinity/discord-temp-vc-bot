@@ -9,6 +9,7 @@ import discord
 import pytest
 import yarl
 
+from temp_vc_bot import countdown_ring
 from temp_vc_bot.bot import TempVCBot
 from temp_vc_bot.config import Settings
 
@@ -32,6 +33,10 @@ async def world(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FakeDiscord]:
         pass
 
     monkeypatch.setattr(discord.Client, "before_identify_hook", no_login_delay)
+    # Draw tiny rings. A full-size one takes long enough that world.settle() could
+    # mistake the pause for the bot having finished. test_units checks full size.
+    monkeypatch.setattr(countdown_ring, "SIZE", 64)
+    monkeypatch.setattr(countdown_ring, "SUPERSAMPLE", 1)
     yield fake
     await fake.stop()
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 import time
@@ -9,21 +10,24 @@ from typing import Any
 
 import discord
 import pytest
+from PIL import Image
 
-from temp_vc_bot import constants
+from temp_vc_bot import constants, countdown_ring
 from temp_vc_bot.bot import TempVCBot
-from temp_vc_bot.services import channel_manager
+from temp_vc_bot.services import channel_manager, timer
 from temp_vc_bot.state import TimerPhase
 from temp_vc_bot.views import extend_prompt
 
 from .conftest import BotStarter
 from .fake_discord import (
+    ATTACH_FILES,
     BOT_USER_ID,
     CATEGORY_ID,
     CONNECT,
     EVERYONE_ROLE_ID,
     GUILD_ID,
     HUB_ID,
+    INVITE_PERMISSIONS,
     MANAGE_CHANNELS,
     MANAGE_ROLES,
     MOVE_MEMBERS,
@@ -51,8 +55,8 @@ def timer_text(world: FakeDiscord, channel_id: int) -> str:
 
 
 def shown_timestamp(world: FakeDiscord, channel_id: int) -> int:
-    """The Unix time in the timer embed's <t:...:R> countdown."""
-    match = re.search(r"<t:(\d+):R>", timer_text(world, channel_id))
+    """The Unix time in the timer embed's <t:...:T> closing time."""
+    match = re.search(r"<t:(\d+):T>", timer_text(world, channel_id))
     assert match, f"No relative timestamp in: {timer_text(world, channel_id)}"
     return int(match.group(1))
 
@@ -520,7 +524,7 @@ class TestTimerStart:
         await world.settle()
         assert not bot.sessions.by_owner(owner).timer_started
 
-    async def test_second_human_starts_it_with_a_live_countdown(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_second_human_starts_it_and_shows_the_closing_time(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
         await world.join_voice(world.add_member("Bob"), channel_id)
         await world.settle()
@@ -553,8 +557,14 @@ class TestTimerStart:
 
 @pytest.fixture
 def fast_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make one "minute" last 0.2 seconds, so timers finish during a test."""
+    """Make one "minute" last 0.2 seconds, so timers finish during a test.
+
+    This also turns off the ring's scheduled redraws. At this speed they would
+    come every 0.2 seconds and race with the tests' clicks and edit counts.
+    TestCountdownRing turns them back on where it needs them.
+    """
     monkeypatch.setattr(constants, "SECONDS_PER_MINUTE", 0.2)
+    monkeypatch.setattr(timer, "RING_REDRAW_MINUTES", 1000)
 
 
 @pytest.fixture
@@ -639,13 +649,104 @@ class TestExtensionPrompt:
         await world.click(owner, prompt, "Yes")
         assert world.messages[int(prompt["id"])]["components"] == []
 
-    async def test_timer_embed_is_edited_only_when_the_state_changes(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_timer_embed_is_redrawn_at_every_phase_change(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # Scheduled ring redraws are off here (see fast_time), so only phase changes edit it.
         owner, channel_id, prompt = await run_to_prompt(world, bot)
         timer_id = int(world.timer_message(channel_id)["id"])
         await world.click(owner, prompt, "Yes")
         await world.wait_for(lambda: channel_id not in world.channels)
-        # Started, time's up, extended, ending. Nothing per second.
+        # Started, time's up, extended, ending.
         assert world.edits_of(timer_id) == 4
+
+
+Ring = tuple[float, tuple[int, int, int], str, str]
+
+
+@pytest.fixture
+def drawn_rings(monkeypatch: pytest.MonkeyPatch) -> list[Ring]:
+    """Record every ring the bot draws, as (fraction left, colour, big text, small text)."""
+    drawn: list[Ring] = []
+    real_render = countdown_ring.render_ring
+
+    def record(fraction_left: float, colour: tuple[int, int, int], headline: str, caption: str) -> bytes:
+        drawn.append((fraction_left, colour, headline, caption))
+        return real_render(fraction_left, colour, headline, caption)
+
+    monkeypatch.setattr(countdown_ring, "render_ring", record)
+    return drawn
+
+
+class TestCountdownRing:
+    async def test_timer_message_shows_the_ring_image(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        _, channel_id = await make_vc(world)
+        message = world.timer_message(channel_id)
+        assert message["embeds"][0]["image"]["url"] == "attachment://countdown.png"
+        assert [attachment["filename"] for attachment in message["attachments"]] == ["countdown.png"]
+        with Image.open(io.BytesIO(world.timer_ring(channel_id))) as image:
+            assert image.format == "PNG"
+
+    async def test_ring_is_full_and_grey_while_waiting(self, world: FakeDiscord, bot: TempVCBot, drawn_rings: list[Ring]) -> None:
+        await make_vc(world)
+        assert drawn_rings == [(1.0, discord.Colour.light_grey().to_rgb(), "Waiting", "for someone to join")]
+
+    async def test_a_new_ring_replaces_the_old_one(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        _, channel_id = await make_vc(world)
+        waiting_ring = world.timer_ring(channel_id)
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.settle()
+        # timer_ring() also checks there's exactly one image, so old rings don't pile up.
+        assert world.timer_ring(channel_id) != waiting_ring
+
+    @pytest.mark.usefixtures("time_to_answer")
+    async def test_nothing_in_the_timer_message_changes_on_its_own(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # A live <t:...:R> countdown changes every second inside Discord, which made the
+        # ring flicker. Every phase must show only fixed text, which only the bot changes.
+        owner, channel_id, prompt = await run_to_prompt(world, bot)
+        texts = [timer_text(world, channel_id)]
+        await world.click(owner, prompt, "Yes")
+        texts.append(timer_text(world, channel_id))
+        assert all(":R>" not in text for text in texts), texts
+
+    @pytest.mark.usefixtures("fast_time")
+    async def test_ring_counts_down_on_schedule_between_phase_changes(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch, drawn_rings: list[Ring]) -> None:
+        monkeypatch.setattr(timer, "RING_REDRAW_MINUTES", 1)  # Every 0.2 seconds at this speed.
+        owner, channel_id = await make_vc(world)
+        bot.sessions.by_owner(owner).timer_minutes = 5
+        timer_id = int(world.timer_message(channel_id)["id"])
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.wait_for(lambda: world.prompt_message(channel_id) is not None)
+
+        green, orange = discord.Colour.green().to_rgb(), discord.Colour.orange().to_rgb()
+        running = drawn_rings[1:6]
+        assert [ring[2:] for ring in running] == [(str(n), "min left") for n in (5, 4, 3, 2, 1)]
+        assert [ring[1] for ring in running] == [green] * 5
+        # The ring empties a fifth at a time. Redraws are drawn as of their planned
+        # moment, so those four are exact. The first one is a moment after the start.
+        assert running[0][0] == pytest.approx(1.0, abs=0.05)
+        assert [ring[0] for ring in running[1:]] == [0.8, 0.6, 0.4, 0.2]
+        # Then a fresh, full orange ring for the owner's answer window.
+        assert drawn_rings[6][1:] == (orange, "2", "min to answer")
+        assert drawn_rings[6][0] == pytest.approx(1.0, abs=0.05)
+        # Started, four redraws, time's up.
+        assert world.edits_of(timer_id) == 6
+
+    @pytest.mark.usefixtures("fast_time")
+    async def test_a_ring_that_fails_to_draw_leaves_a_working_text_timer(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+        def broken(*args: Any) -> bytes:
+            raise ValueError("Drawing failed.")
+
+        monkeypatch.setattr(countdown_ring, "render_ring", broken)
+        owner, channel_id = await make_vc(world)
+        message = world.timer_message(channel_id)
+        assert "image" not in message["embeds"][0]
+        assert message["attachments"] == []
+        assert timer_text(world, channel_id) == "Waiting for someone to join…"
+        assert "Could not draw the countdown ring" in caplog.text
+
+        # The countdown still runs, and the channel still closes when nobody answers.
+        bot.sessions.by_owner(owner).timer_minutes = 1
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.wait_for(lambda: channel_id not in world.channels)
 
 
 class TestCleanup:
@@ -976,7 +1077,7 @@ class TestErrors:
         assert [int(user) for user in notice["allowed_mentions_sent"]["users"]] == [owner]
 
     async def test_failure_after_creating_removes_the_channel(self, world: FakeDiscord, start_bot: BotStarter) -> None:
-        world.bot_permissions = 286280720 & ~(1 << 28)  # Everything except Manage Roles.
+        world.bot_permissions = INVITE_PERMISSIONS & ~(1 << 28)  # Everything except Manage Roles.
         await start_bot()
         owner = world.add_member("Alice")
         await world.join_voice(owner, HUB_ID)
@@ -987,9 +1088,14 @@ class TestErrors:
         assert "permission" in notice["content"]
 
     async def test_startup_logs_exactly_which_permissions_are_missing(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
-        world.bot_permissions = 286280720 & ~(1 << 24)  # Everything except Move Members.
+        world.bot_permissions = INVITE_PERMISSIONS & ~(1 << 24)  # Everything except Move Members.
         await start_bot()
         assert "Move Members" in caplog.text
+
+    async def test_startup_logs_missing_attach_files_which_the_ring_needs(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
+        world.bot_permissions = INVITE_PERMISSIONS & ~ATTACH_FILES
+        await start_bot()
+        assert "Attach Files" in caplog.text
 
     async def test_wrong_hub_and_category_ids_are_logged(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
         del world.channels[CATEGORY_ID]

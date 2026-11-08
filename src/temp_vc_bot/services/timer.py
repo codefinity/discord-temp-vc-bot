@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
+import math
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 import discord
 
-from ..constants import ANSWER_WINDOW_MINUTES, EXTEND_QUESTION, EXTENSION_MINUTES, WAITING_MESSAGE, minutes_to_delta
+from .. import countdown_ring
+from ..constants import (
+    ANSWER_WINDOW_MINUTES,
+    EXTEND_QUESTION,
+    EXTENSION_MINUTES,
+    RING_REDRAW_MINUTES,
+    WAITING_MESSAGE,
+    minutes_to_delta,
+)
 from ..errors import API_ERRORS
 from ..state import TempVCSession, TimerPhase
 from ..views.extend_prompt import ExtendPromptView
@@ -25,12 +37,15 @@ _PHASE_COLOURS = {
 }
 
 
-def _live_countdown(moment: datetime | None) -> str:
-    """Format a time as <t:UNIX_TIMESTAMP:R>, which every Discord client counts down by itself.
+def _closing_time(moment: datetime | None) -> str:
+    """Format a time as <t:UNIX_TIMESTAMP:T>, which Discord shows in each viewer's own time zone.
 
-    This is why the bot only has to edit the message when the phase changes.
+    This is a fixed time on purpose, not a live countdown (<t:...:R>). A live
+    countdown changes every second inside Discord, and that made the ring flicker.
+    With a fixed time, nothing in the timer message changes between the bot's own
+    edits. The ring shows how long is left.
     """
-    return discord.utils.format_dt(moment, "R") if moment else "soon"
+    return f"at {discord.utils.format_dt(moment, 'T')}" if moment else "soon"
 
 
 def _timer_text(session: TempVCSession) -> str:
@@ -39,22 +54,82 @@ def _timer_text(session: TempVCSession) -> str:
         case TimerPhase.WAITING:
             return WAITING_MESSAGE
         case TimerPhase.RUNNING:
-            return f"This channel closes {_live_countdown(session.ends_at)}."
+            return f"This channel closes {_closing_time(session.ends_at)}."
         case TimerPhase.AWAITING_ANSWER:
-            deadline = _live_countdown(session.answer_deadline)
+            deadline = _closing_time(session.answer_deadline)
             return f"Time's up! This channel closes {deadline} unless the owner extends it."
         case TimerPhase.EXTENDED:
             return (
                 f"Extended by {EXTENSION_MINUTES} minutes. "
-                f"This channel closes {_live_countdown(session.ends_at)} and can't be extended again."
+                f"This channel closes {_closing_time(session.ends_at)} and can't be extended again."
             )
         case TimerPhase.ENDING:
             return "Time's up. This channel is closing now."
 
 
-def build_timer_embed(session: TempVCSession) -> discord.Embed:
-    """Build the timer embed from the session's current state."""
-    return discord.Embed(title="⏳ Timer", description=_timer_text(session), colour=_PHASE_COLOURS[session.phase])
+def build_timer_embed(session: TempVCSession, *, with_ring: bool = True) -> discord.Embed:
+    """Build the timer embed from the session's current state.
+
+    With `with_ring`, the embed shows the attached ring image under the text.
+    """
+    embed = discord.Embed(title="⏳ Timer", description=_timer_text(session), colour=_PHASE_COLOURS[session.phase])
+    if with_ring:
+        embed.set_image(url=f"attachment://{countdown_ring.FILENAME}")
+    return embed
+
+
+def ring_face(session: TempVCSession, now: datetime) -> tuple[float, str, str]:
+    """What the ring shows at `now`: how full it is, the big text, and the small text.
+
+    The ring counts down whichever stretch of time the session is in: the base
+    time, the owner's answer window, or the extra time. The big number is the
+    minutes left, rounded up, so it reaches 0 only when time is up.
+    """
+    match session.phase:
+        case TimerPhase.WAITING:
+            return 1.0, "Waiting", "for someone to join"
+        case TimerPhase.RUNNING:
+            deadline, length, caption = session.ends_at, session.timer_minutes, "min left"
+        case TimerPhase.AWAITING_ANSWER:
+            deadline, length, caption = session.answer_deadline, ANSWER_WINDOW_MINUTES, "min to answer"
+        case TimerPhase.EXTENDED:
+            deadline, length, caption = session.ends_at, EXTENSION_MINUTES, "min left"
+        case TimerPhase.ENDING:
+            return 0.0, "0", "closing"
+    assert deadline is not None, "A running timer always has a deadline."
+    minutes_left = max((deadline - now) / minutes_to_delta(1), 0.0)
+    return minutes_left / length, str(math.ceil(minutes_left)), caption
+
+
+def redraw_times(deadline: datetime, now: datetime) -> list[datetime]:
+    """When to redraw the ring between `now` and `deadline`.
+
+    The times are counted back from the deadline in steps of RING_REDRAW_MINUTES,
+    rather than forward from now. That way each redraw lands exactly on a step,
+    so the minutes shown are exact at the moment the ring is drawn. The deadline
+    itself isn't included, because the phase change at that moment redraws anyway.
+    """
+    step = minutes_to_delta(RING_REDRAW_MINUTES)
+    steps_before_deadline = math.ceil((deadline - now) / step) - 1
+    return [deadline - count * step for count in range(steps_before_deadline, 0, -1)]
+
+
+async def draw_ring(session: TempVCSession, as_of: datetime) -> discord.File | None:
+    """Draw the ring for the session's state at `as_of`, as a file to attach.
+
+    Returns None if drawing fails, so the timer carries on with text only. A
+    broken image must never stop a channel from closing on time.
+    """
+    colour = _PHASE_COLOURS[session.phase].to_rgb()
+    try:
+        fraction_left, headline, caption = ring_face(session, as_of)
+        # Drawing takes tens of milliseconds, so it runs in a thread to keep the
+        # bot responding to everything else meanwhile.
+        png = await asyncio.to_thread(countdown_ring.render_ring, fraction_left, colour, headline, caption)
+    except Exception:
+        log.exception("Could not draw the countdown ring for channel %s.", session.channel_id)
+        return None
+    return discord.File(io.BytesIO(png), filename=countdown_ring.FILENAME)
 
 
 class TimerService:
@@ -64,8 +139,10 @@ class TimerService:
         self.channels = channels
 
     async def post_timer_message(self, session: TempVCSession, channel: discord.VoiceChannel) -> None:
-        """Post the timer embed for the first time."""
-        message = await channel.send(embed=build_timer_embed(session))
+        """Post the timer embed and its ring for the first time."""
+        ring = await draw_ring(session, discord.utils.utcnow())
+        embed = build_timer_embed(session, with_ring=ring is not None)
+        message = await channel.send(embed=embed, files=[ring] if ring else [])
         session.timer_message_id = message.id
 
     async def maybe_start(self, session: TempVCSession) -> None:
@@ -89,16 +166,26 @@ class TimerService:
         if session.panel_view is not None:
             await session.panel_view.refresh_message()
 
-    async def _update_timer_message(self, session: TempVCSession) -> None:
-        """Edit the timer embed. It is only called when the phase changes, to avoid rate limits."""
-        channel = self.channels.get_channel(session)
-        if channel is None or session.timer_message_id is None:
-            return
-        try:
-            message = channel.get_partial_message(session.timer_message_id)
-            await message.edit(embed=build_timer_embed(session))
-        except API_ERRORS as error:
-            log.warning("Could not update the timer message in channel %s: %s", session.channel_id, error)
+    async def _update_timer_message(self, session: TempVCSession, *, as_of: datetime | None = None) -> None:
+        """Redraw the timer embed and its ring, showing the time left at `as_of` (default: now).
+
+        This runs when the phase changes and every RING_REDRAW_MINUTES in between.
+        The text only changes with the phase, because it shows a fixed closing time.
+        """
+        # One edit at a time, each drawn from the state at the moment it is sent.
+        # Otherwise a slow redraw could land after a newer phase change and undo it.
+        async with session.timer_message_lock:
+            channel = self.channels.get_channel(session)
+            if channel is None or session.timer_message_id is None:
+                return
+            ring = await draw_ring(session, as_of or discord.utils.utcnow())
+            embed = build_timer_embed(session, with_ring=ring is not None)
+            try:
+                message = channel.get_partial_message(session.timer_message_id)
+                # Listing only the new ring replaces the previous one.
+                await message.edit(embed=embed, attachments=[ring] if ring else [])
+            except API_ERRORS as error:
+                log.warning("Could not update the timer message in channel %s: %s", session.channel_id, error)
 
     async def _run(self, session: TempVCSession) -> None:
         """Count down, then close the channel. Runs as a background task."""
@@ -123,11 +210,32 @@ class TimerService:
             await self._sleep_until_end(session)
             # No second question here: when the extra time ends, the channel closes.
 
-    @staticmethod
-    async def _sleep_until_end(session: TempVCSession) -> None:
-        """Wait until the session's current end time."""
+    async def _sleep_until_end(self, session: TempVCSession) -> None:
+        """Wait until the session's current end time, redrawing the ring on the way."""
         assert session.ends_at is not None, "The timer must have started before it can run out."
-        await discord.utils.sleep_until(session.ends_at)
+        async with self._redrawing(session, session.ends_at):
+            await discord.utils.sleep_until(session.ends_at)
+
+    @asynccontextmanager
+    async def _redrawing(self, session: TempVCSession, deadline: datetime) -> AsyncIterator[None]:
+        """Redraw the ring on schedule until `deadline`, while the `async with` block runs.
+
+        The redraws run as their own task, so a slow edit can never hold up the
+        countdown itself. Leaving the block stops them.
+        """
+        redraws = asyncio.create_task(self._redraw_until(session, deadline), name=f"ring-{session.channel_id}")
+        try:
+            yield
+        finally:
+            redraws.cancel()
+
+    async def _redraw_until(self, session: TempVCSession, deadline: datetime) -> None:
+        """Redraw the ring at each of the redraw times before `deadline`."""
+        for moment in redraw_times(deadline, discord.utils.utcnow()):
+            await discord.utils.sleep_until(moment)
+            # Draw it as of the planned moment, not the clock. asyncio can end a sleep
+            # a few milliseconds early, and 14:00.003 left would round up to "15".
+            await self._update_timer_message(session, as_of=moment)
 
     async def _owner_wants_extension(self, session: TempVCSession) -> bool:
         """Ask the owner whether to extend. No answer in time counts as No."""
@@ -135,7 +243,8 @@ class TimerService:
         if channel is None:
             return False
 
-        session.await_answer(discord.utils.utcnow() + minutes_to_delta(ANSWER_WINDOW_MINUTES))
+        deadline = discord.utils.utcnow() + minutes_to_delta(ANSWER_WINDOW_MINUTES)
+        session.await_answer(deadline)
         await self._update_timer_message(session)
 
         view = ExtendPromptView(session.owner_id)
@@ -145,7 +254,8 @@ class TimerService:
                 view=view,
                 allowed_mentions=discord.AllowedMentions(users=[discord.Object(session.owner_id)]),
             )
-            await view.wait()
+            async with self._redrawing(session, deadline):
+                await view.wait()
         except API_ERRORS as error:
             log.warning("Could not ask the owner of channel %s about extending: %s", session.channel_id, error)
         finally:

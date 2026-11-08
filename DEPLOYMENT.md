@@ -56,13 +56,13 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
 
 1. Copy this link into a text editor, and replace `YOUR_APPLICATION_ID` with the ID from Step 2:
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=286280720&scope=bot
+   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=286313488&scope=bot
    ```
 2. Open the edited link in your browser.
 3. Choose your server and click **Continue**.
 4. Keep every permission ticked, then click **Authorize**.
 
-The number in the link, `286280720`, stands for exactly these seven permissions:
+The number in the link, `286313488`, stands for exactly these eight permissions:
 
 | Permission | Why the bot needs it |
 |---|---|
@@ -73,6 +73,9 @@ The number in the link, `286280720`, stands for exactly these seven permissions:
 | **Move Members** | To move people from the hub into their channel. |
 | **Send Messages** | To post the control panel, timer and extension question. |
 | **Embed Links** | To show the control panel and timer as embeds. |
+| **Attach Files** | To show the circular countdown, which is a picture attached to the timer. |
+
+**Invited the bot before the circular countdown was added?** Open the new link once more to add Attach Files. You don't need to remove the bot first.
 
 The bot doesn't need Administrator. Please don't give it that, since the bot works without it.
 
@@ -162,8 +165,9 @@ You can share this section with your server.
 
 **The timer:**
 
-- The timer message says "Waiting for someone to join…" until someone other than you joins. Bots don't count.
-- Once someone joins, a live countdown appears and the dropdown is disabled.
+- The timer message says "Waiting for someone to join…", with a full grey ring, until someone other than you joins. Bots don't count.
+- Once someone joins, the countdown starts and the dropdown is disabled. The ring turns green and empties clockwise as time passes, with the minutes left in the middle. It updates once a minute, and the text above it shows the time the channel closes.
+- While you're being asked to extend, an orange ring counts down the 2 minutes you have to answer. If you say Yes, a blue ring counts down the extra time.
 - The countdown keeps going even if people leave.
 
 **When time runs out,** the bot tags you and asks "Time's up! Extend by 10 minutes?":
@@ -182,14 +186,14 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 1. Open `src/temp_vc_bot/constants.py` in a text editor.
 2. Change `SECONDS_PER_MINUTE = 60` to `SECONDS_PER_MINUTE = 6`, and save.
-3. Restart the bot. Everything now runs ten times faster: the 20-minute timer takes 2 minutes, the 2-minute answer window takes 12 seconds, and the extra 10 minutes take 1 minute. The messages still say the normal numbers.
+3. Restart the bot. Everything now runs ten times faster: the 20-minute timer takes 2 minutes, the 2-minute answer window takes 12 seconds, and the extra 10 minutes take 1 minute. The messages and the ring still say the normal numbers.
 4. **Change it back to 60 when you've finished, and restart the bot.**
 
 **Creating a channel**
 
 - [ ] Join the hub. You're moved into a new channel named after you, in the right category.
 - [ ] The bot appears in your channel, shown as deafened.
-- [ ] The control panel and a timer saying "Waiting for someone to join…" appear in the text chat.
+- [ ] The control panel and a timer saying "Waiting for someone to join…", with a full grey ring, appear in the text chat.
 - [ ] Join the hub again. You go back to the same channel, and no new one appears.
 - [ ] With the bot still in your channel, have your friend join the hub. They get their own channel, the bot stays in yours, and their buttons still work.
 
@@ -206,12 +210,13 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 **Timer**
 
 - [ ] **Set timer:** choose 25 minutes. The panel shows 25.
-- [ ] **Timer start:** have your friend join. A countdown appears and the dropdown becomes disabled.
+- [ ] **Timer start:** have your friend join. The ring turns green, showing 25 min left, and the dropdown becomes disabled.
+- [ ] **Ring moves:** wait a little. The ring empties clockwise and the minutes in the middle go down.
 - [ ] **Keeps running:** have your friend leave. The countdown continues.
 
 **Extension** (you'll need to run the timer three times)
 
-- [ ] **Yes:** when time runs out, the bot tags you and asks. Your friend clicking gets the private note. You click Yes, and the countdown updates. When it ends, the channel is deleted without asking again.
+- [ ] **Yes:** when time runs out, the bot tags you and asks, and the ring turns orange. Your friend clicking gets the private note. You click Yes, and the countdown updates with a blue ring. When it ends, the channel is deleted without asking again.
 - [ ] **No:** run it again and click No. The channel is deleted.
 - [ ] **No answer:** run it again and don't click. The channel is deleted when the answer window ends.
 
@@ -275,6 +280,8 @@ The channel still works without the bot in it, so this isn't urgent. The log say
 | The bot says it can't find the category | The category was deleted. | Create a new one and update `TEMP_VC_CATEGORY_ID`. |
 | A new channel can't be created, and a notice appears in the hub | The category is full (Discord allows 50 channels in one) or the server is full (500). | Delete some channels. |
 | The countdown shows the wrong time | The computer's clock is wrong. | Fix the clock. On a server, see [HOSTING.md](HOSTING.md). |
+| The ring looks blurred for a moment when it first appears or changes | Discord shows a blurred preview of every new picture until it has loaded. A slow connection makes it last longer. | Nothing to fix: it sharpens once loaded. The ring changes once a minute to keep this rare. |
+| The timer shows text but no ring | The bot is missing Attach Files (the log names it at startup), or drawing failed (the log says `Could not draw the countdown ring`). | Open the invite link from Step 3 again. For a drawing error, check `uv sync` finished without errors. |
 | Timers run far too fast | `SECONDS_PER_MINUTE` is still set for testing. | Set it back to 60 in `constants.py` and restart. |
 | Channels get deleted right after they're created, or everything happens twice | Two copies of the bot are running, perhaps one on your computer and one on a server. Each sees the other's channels as leftovers. | Stop one of them. |
 | `warning: VIRTUAL_ENV=... does not match` | You have Anaconda or another Python tool active. | This is harmless, so you can ignore it. |

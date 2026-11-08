@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import io
+import math
+from datetime import UTC, datetime, timedelta
 
 import discord
 import pytest
+from PIL import Image
 
-from temp_vc_bot import constants, main
+from temp_vc_bot import constants, countdown_ring, main
 from temp_vc_bot.bot import build_intents
 from temp_vc_bot.config import ConfigError, load_settings
+from temp_vc_bot.countdown_ring import render_ring
 from temp_vc_bot.errors import describe_wait, friendly_error
 from temp_vc_bot.services.channel_manager import seats_needed
-from temp_vc_bot.state import SessionRegistry, TempVCSession
+from temp_vc_bot.services.timer import redraw_times, ring_face
+from temp_vc_bot.state import SessionRegistry, TempVCSession, TimerPhase
 from temp_vc_bot.views.modals import parse_user_limit
 
 from .fake_discord import INVITE_PERMISSIONS
@@ -45,6 +50,122 @@ class TestMaximumLifetime:
         session.await_answer(session.ends_at + constants.minutes_to_delta(constants.ANSWER_WINDOW_MINUTES))
         session.extend()
         assert session.ends_at - start == constants.minutes_to_delta(constants.MAX_LIFETIME_MINUTES)
+
+
+START = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def minutes(amount: float) -> timedelta:
+    return constants.minutes_to_delta(amount)
+
+
+class TestRingFace:
+    """What the ring shows: (fraction left, big text, small text)."""
+
+    def test_waiting(self) -> None:
+        session = TempVCSession(channel_id=1, owner_id=2)
+        assert ring_face(session, START) == (1.0, "Waiting", "for someone to join")
+
+    def test_running_rounds_the_minutes_up(self) -> None:
+        session = TempVCSession(channel_id=1, owner_id=2, timer_minutes=20)
+        session.start_timer(START)
+        assert ring_face(session, START) == (1.0, "20", "min left")
+        assert ring_face(session, START + minutes(5.5)) == (14.5 / 20, "15", "min left")
+        assert ring_face(session, START + minutes(6)) == (14 / 20, "14", "min left")
+        assert ring_face(session, START + minutes(19.9))[1] == "1", "It shows 1 until the very end, not 0."
+
+    def test_answer_window_counts_down_the_two_minutes(self) -> None:
+        session = TempVCSession(channel_id=1, owner_id=2)
+        session.start_timer(START)
+        time_up = session.ends_at
+        session.await_answer(time_up + minutes(constants.ANSWER_WINDOW_MINUTES))
+        assert ring_face(session, time_up) == (1.0, "2", "min to answer")
+        assert ring_face(session, time_up + minutes(1.5)) == (0.25, "1", "min to answer")
+
+    def test_extra_time_is_measured_against_the_10_extra_minutes(self) -> None:
+        session = TempVCSession(channel_id=1, owner_id=2)
+        session.start_timer(START)
+        time_up = session.ends_at
+        session.await_answer(time_up + minutes(2))
+        session.extend()
+        # The owner answered after 1 minute, so 9 of the 10 extra minutes are left.
+        assert ring_face(session, time_up + minutes(1)) == (0.9, "9", "min left")
+
+    def test_ending_and_overdue_both_show_an_empty_ring(self) -> None:
+        session = TempVCSession(channel_id=1, owner_id=2)
+        session.start_timer(START)
+        assert ring_face(session, session.ends_at + minutes(1)) == (0.0, "0", "min left")
+        session.phase = TimerPhase.ENDING
+        assert ring_face(session, START) == (0.0, "0", "closing")
+
+
+class TestRedrawTimes:
+    def test_counted_back_from_the_deadline_in_whole_steps(self) -> None:
+        step = minutes(constants.RING_REDRAW_MINUTES)
+        deadline = START + minutes(1)
+        # Starting a little off-step, the first redraw comes early to get back in line.
+        now = deadline - 4 * step + timedelta(seconds=1)
+        assert redraw_times(deadline, now) == [deadline - 3 * step, deadline - 2 * step, deadline - step]
+
+    def test_now_and_the_deadline_itself_are_left_out(self) -> None:
+        step = minutes(constants.RING_REDRAW_MINUTES)
+        deadline = START + minutes(1)
+        # The caller has just drawn "now", and the phase change at the deadline draws too.
+        assert redraw_times(deadline, deadline - 2 * step) == [deadline - step]
+
+    @pytest.mark.parametrize("seconds_left", [0, -5, 1])
+    def test_nothing_to_redraw_when_less_than_a_step_is_left(self, seconds_left: float) -> None:
+        deadline = START + minutes(1)
+        assert redraw_times(deadline, deadline - timedelta(seconds=seconds_left)) == []
+
+    def test_a_20_minute_timer_is_redrawn_once_a_minute_as_the_number_changes(self) -> None:
+        # Each redraw shows Discord's blurred loading preview for a moment, so there
+        # should be no redraws that don't change the minutes shown.
+        session = TempVCSession(channel_id=1, owner_id=2, timer_minutes=20)
+        session.start_timer(START)
+        times = redraw_times(session.ends_at, START)
+        assert len(times) == 19
+        assert {later - earlier for earlier, later in zip(times, times[1:])} == {timedelta(minutes=1)}
+        shown = [ring_face(session, moment)[1] for moment in times]
+        assert shown == [str(n) for n in range(19, 0, -1)]
+
+
+class TestRenderRing:
+    GREEN = (46, 204, 113)
+
+    def draw(self, fraction_left: float) -> Image.Image:
+        return Image.open(io.BytesIO(render_ring(fraction_left, self.GREEN, "15", "min left"))).convert("RGBA")
+
+    def ring_pixel(self, image: Image.Image, clock_hour: float) -> tuple[int, ...]:
+        """The pixel in the middle of the ring's thickness, at a position on a clock face."""
+        angle = math.radians(clock_hour * 30 - 90)
+        radius = image.width * (0.5 - countdown_ring._MARGIN - countdown_ring._RING_WIDTH / 2)
+        centre = image.width / 2
+        return image.getpixel((round(centre + radius * math.cos(angle)), round(centre + radius * math.sin(angle))))
+
+    def test_is_a_square_png_with_see_through_corners(self) -> None:
+        image = self.draw(0.5)
+        assert image.size == (countdown_ring.SIZE, countdown_ring.SIZE)
+        assert image.getpixel((0, 0))[3] == 0, "Only the round dial is drawn, so it suits any theme."
+
+    def test_coloured_part_shrinks_clockwise_from_12(self) -> None:
+        # A quarter left: coloured from 9 o'clock to 12, and the rest is bare track.
+        image = self.draw(0.25)
+        assert self.ring_pixel(image, 10.5)[:3] == self.GREEN
+        assert self.ring_pixel(image, 3)[:3] == countdown_ring._TRACK
+        assert self.ring_pixel(image, 7)[:3] == countdown_ring._TRACK
+
+    @pytest.mark.parametrize(("fraction_left", "coloured"), [(1.0, True), (1.5, True), (0.0, False), (-1.0, False)])
+    def test_fraction_is_kept_between_empty_and_full(self, fraction_left: float, coloured: bool) -> None:
+        pixel = self.ring_pixel(self.draw(fraction_left), 6)[:3]
+        assert pixel == (self.GREEN if coloured else countdown_ring._TRACK)
+
+    def test_long_text_is_shrunk_to_fit_inside_the_ring(self) -> None:
+        png = render_ring(1.0, self.GREEN, "Waiting for a very long time", "and a long caption to match it")
+        image = Image.open(io.BytesIO(png)).convert("RGBA")
+        # The ring at 3 and 9 o'clock is still pure ring colour, so no text spilled onto it.
+        assert self.ring_pixel(image, 3)[:3] == self.GREEN
+        assert self.ring_pixel(image, 9)[:3] == self.GREEN
 
 
 class TestSeats:
@@ -111,6 +232,7 @@ class TestIntentsAndInvite:
             move_members=True,
             send_messages=True,
             embed_links=True,
+            attach_files=True,
         )
         assert documented.value == INVITE_PERMISSIONS
 
