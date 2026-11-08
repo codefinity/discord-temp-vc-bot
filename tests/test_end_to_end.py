@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
@@ -31,6 +32,7 @@ from .fake_discord import (
     MANAGE_CHANNELS,
     MANAGE_ROLES,
     MOVE_MEMBERS,
+    SEND_MESSAGES,
     VIEW_CHANNEL,
     FakeDiscord,
     find_component,
@@ -561,10 +563,13 @@ def fast_time(monkeypatch: pytest.MonkeyPatch) -> None:
 
     This also turns off the ring's scheduled redraws. At this speed they would
     come every 0.2 seconds and race with the tests' clicks and edit counts.
-    TestCountdownRing turns them back on where it needs them.
+    TestCountdownRing turns them back on where it needs them. For the same reason,
+    the timer doesn't move below the extension prompt here. TestTimerStaysInView
+    checks that it does.
     """
     monkeypatch.setattr(constants, "SECONDS_PER_MINUTE", 0.2)
     monkeypatch.setattr(timer, "RING_REDRAW_MINUTES", 1000)
+    monkeypatch.setattr(timer, "TIMER_REPOST_DELAY_SECONDS", 1000)
 
 
 @pytest.fixture
@@ -749,6 +754,92 @@ class TestCountdownRing:
         await world.wait_for(lambda: channel_id not in world.channels)
 
 
+REPOST_DELAY = 0.2  # Seconds, in TestTimerStaysInView.
+
+
+@pytest.fixture
+def quick_repost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Move the timer down 0.2 seconds after a message, instead of 5."""
+    monkeypatch.setattr(timer, "TIMER_REPOST_DELAY_SECONDS", REPOST_DELAY)
+
+
+def newest_message_id(world: FakeDiscord, channel_id: int) -> str:
+    return max(world.messages_in(channel_id), key=lambda message: int(message["id"]))["id"]
+
+
+def timer_posts(world: FakeDiscord, channel_id: int) -> int:
+    """How many messages the bot has posted in a channel."""
+    return world.request_count("POST", f"/channels/{channel_id}/messages")
+
+
+@pytest.mark.usefixtures("quick_repost")
+class TestTimerStaysInView:
+    async def test_chat_moves_the_timer_back_to_the_bottom(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        old_id = world.timer_message(channel_id)["id"]
+        await world.say(owner, channel_id)
+        # timer_message() finds the oldest timer, so this waits for the old one to go.
+        await world.wait_for(lambda: world.timer_message(channel_id)["id"] != old_id)
+        await world.settle()
+        assert newest_message_id(world, channel_id) == world.timer_message(channel_id)["id"]
+        assert int(old_id) not in world.messages
+        world.timer_ring(channel_id)  # The new one has its ring.
+
+    async def test_a_burst_of_messages_costs_one_repost(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        posts_before = timer_posts(world, channel_id)
+        for _ in range(5):
+            await world.say(owner, channel_id)
+        await world.wait_for(lambda: timer_posts(world, channel_id) > posts_before)
+        # Discord also reports the bot's own repost to it, here before replying to
+        # the post. That must not look like a new message under the timer.
+        await asyncio.sleep(REPOST_DELAY * 5)
+        await world.settle()
+        assert timer_posts(world, channel_id) == posts_before + 1
+
+    async def test_the_moved_timer_keeps_counting_down(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        old_id = world.timer_message(channel_id)["id"]
+        await world.say(owner, channel_id)
+        await world.wait_for(lambda: world.timer_message(channel_id)["id"] != old_id)
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.settle()
+        assert world.edits_of(int(world.timer_message(channel_id)["id"])) == 1
+        assert shown_timestamp(world, channel_id) == int(bot.sessions.by_owner(owner).ends_at.timestamp())
+
+    @pytest.mark.usefixtures("time_to_answer")
+    async def test_the_timer_moves_below_the_extension_prompt(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(timer, "TIMER_REPOST_DELAY_SECONDS", REPOST_DELAY)  # fast_time turns it off.
+        _, channel_id, prompt = await run_to_prompt(world, bot)
+        await world.wait_for(lambda: int(world.timer_message(channel_id)["id"]) > int(prompt["id"]))
+        assert world.timer_message(channel_id)["embeds"][0]["color"] == discord.Colour.orange().value
+
+    async def test_if_the_new_timer_cannot_be_posted_the_old_one_stays(self, world: FakeDiscord, bot: TempVCBot, caplog: pytest.LogCaptureFixture) -> None:
+        owner, channel_id = await make_vc(world)
+        old_id = world.timer_message(channel_id)["id"]
+        bot_overwrite = world.overwrite_on(channel_id, BOT_USER_ID)
+        bot_overwrite["allow"] = str(int(bot_overwrite["allow"]) & ~SEND_MESSAGES)
+        bot_overwrite["deny"] = str(SEND_MESSAGES)
+        await world.say(owner, channel_id)
+        await world.wait_for(lambda: "Could not move the timer down" in caplog.text)
+        assert world.timer_message(channel_id)["id"] == old_id
+        # And it still updates.
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.settle()
+        assert "This channel closes" in timer_text(world, channel_id)
+
+    async def test_closing_the_channel_cancels_a_waiting_repost(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(timer, "TIMER_REPOST_DELAY_SECONDS", 1000)
+        owner, channel_id = await make_vc(world)
+        session = bot.sessions.by_owner(owner)
+        await world.say(owner, channel_id)
+        await world.wait_for(lambda: session.repost_task is not None)
+        await world.leave_voice(owner)
+        await world.settle()
+        assert channel_id not in world.channels
+        assert session.repost_task.cancelled()
+
+
 class TestCleanup:
     async def test_channel_is_deleted_when_the_last_human_leaves(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
@@ -918,8 +1009,8 @@ class TestStartupAndReconnect:
         await world.settle()
         assert world.voice[waiting] == int(world.only_temp_channel()["id"])
 
-    async def test_only_the_guilds_and_voice_state_intents_are_requested(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        assert world.identify["intents"] == (1 << 0) | (1 << 7)
+    async def test_only_the_guilds_voice_state_and_guild_message_intents_are_requested(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        assert world.identify["intents"] == (1 << 0) | (1 << 7) | (1 << 9)
 
     async def test_events_from_other_servers_are_ignored(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
         # The bot is set up for a different server from the one this event comes from.

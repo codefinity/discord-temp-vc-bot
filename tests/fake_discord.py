@@ -13,6 +13,9 @@ Discord's documentation:
 - A channel can be renamed about twice per 10 minutes, then Discord answers 429.
 - Uploading a file needs Attach Files. An edit's attachment list replaces the
   message's attachments: old ones not listed are removed.
+- Every new message is reported over the gateway, the bot's own included. The
+  order of that report and the reply to the post isn't guaranteed, so the fake
+  sends the report first, which is the harder case for the bot.
 
 It does not handle voice audio. FakeVoiceClient stands in for that part, which is
 why a real voice connection can only be checked on a real server.
@@ -396,6 +399,12 @@ class FakeDiscord:
         self.voice.pop(member_id, None)
         await self._dispatch("VOICE_STATE_UPDATE", self._voice_state(member_id, None))
 
+    async def say(self, member_id: int, channel_id: int, text: str = "hello") -> dict[str, Any]:
+        """A person posts a message in a channel's text chat."""
+        message = self._message_payload(channel_id, {"content": text}, author_id=member_id)
+        await self._add_message(message)
+        return message
+
     async def click(self, member_id: int, message: dict[str, Any], label: str) -> InteractionRecord:
         """A person clicks the button with this label."""
         component = _find_all(message, "label", label)[0]
@@ -756,12 +765,12 @@ class FakeDiscord:
         await self._dispatch("CHANNEL_DELETE", channel)
         return channel
 
-    def _message_payload(self, channel_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    def _message_payload(self, channel_id: int, body: dict[str, Any], *, author_id: int = BOT_USER_ID) -> dict[str, Any]:
         return {
             "id": str(self.next_id()),
             "channel_id": str(channel_id),
             "guild_id": str(GUILD_ID),
-            "author": self.members[BOT_USER_ID]["user"],
+            "author": self.members[author_id]["user"],
             "content": body.get("content") or "",
             "timestamp": "2026-01-01T00:00:00+00:00",
             "edited_timestamp": None,
@@ -789,8 +798,14 @@ class FakeDiscord:
             return _error(403, 50013, "Missing Permissions")
         message = self._message_payload(channel_id, body)
         message["attachments"] = self._attachments_after(request, body.get("attachments") or [], [])
-        self.messages[int(message["id"])] = message
+        await self._add_message(message)
         return _json(message)
+
+    async def _add_message(self, message: dict[str, Any]) -> None:
+        """Store a new message and report it to the bot, as Discord does for every message."""
+        self.messages[int(message["id"])] = message
+        self.channels[int(message["channel_id"])]["last_message_id"] = message["id"]
+        await self._dispatch("MESSAGE_CREATE", message)
 
     def _apply_edit(self, message: dict[str, Any], body: dict[str, Any]) -> None:
         for key in ("content", "embeds", "components"):
@@ -810,7 +825,8 @@ class FakeDiscord:
         return _json(message)
 
     async def _delete_message(self, request: web.Request, body: dict[str, Any]) -> web.Response:
-        self.messages.pop(int(request.match_info["message_id"]), None)
+        if self.messages.pop(int(request.match_info["message_id"]), None) is None:
+            return _error(404, 10008, "Unknown Message")
         return web.Response(status=204)
 
     async def _interaction_callback(self, request: web.Request, body: dict[str, Any]) -> web.Response:

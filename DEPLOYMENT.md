@@ -45,7 +45,7 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
 
    > **Treat the token like a password.** Anyone who has it can control your bot. Never share it or post it anywhere. If it ever leaks, click **Reset Token** again and update your `.env` file.
 
-6. Still on the **Bot** page, find **Privileged Gateway Intents** and leave all three switches **off**. This bot only needs the server and voice events that Discord allows by default.
+6. Still on the **Bot** page, find **Privileged Gateway Intents** and leave all three switches **off**. This bot only needs the server, voice and message events that Discord allows by default. It sees that a message was posted, but not what it says.
 
 **Optional: stop other people adding your bot.** This is recommended, but the bot ignores other servers anyway. Do these in this order, because Discord shows an error if you do them the other way round:
 
@@ -169,6 +169,7 @@ You can share this section with your server.
 - Once someone joins, the countdown starts and the dropdown is disabled. The ring turns green and empties clockwise as time passes, with the minutes left in the middle. It updates once a minute, and the text above it shows the time the channel closes.
 - While you're being asked to extend, an orange ring counts down the 2 minutes you have to answer. If you say Yes, a blue ring counts down the extra time.
 - The countdown keeps going even if people leave.
+- The timer stays at the bottom of the chat. A few seconds after anyone posts, the bot moves it back below the new messages.
 
 **When time runs out,** the bot tags you and asks "Time's up! Extend by 10 minutes?":
 
@@ -212,6 +213,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 - [ ] **Set timer:** choose 25 minutes. The panel shows 25.
 - [ ] **Timer start:** have your friend join. The ring turns green, showing 25 min left, and the dropdown becomes disabled.
 - [ ] **Ring moves:** wait a little. The ring empties clockwise and the minutes in the middle go down.
+- [ ] **Stays in view:** send a few messages in the channel's chat. About 5 seconds after the last one, the timer moves back to the bottom, and only one timer is left.
 - [ ] **Keeps running:** have your friend leave. The countdown continues.
 
 **Extension** (you'll need to run the timer three times)
@@ -281,6 +283,7 @@ The channel still works without the bot in it, so this isn't urgent. The log say
 | A new channel can't be created, and a notice appears in the hub | The category is full (Discord allows 50 channels in one) or the server is full (500). | Delete some channels. |
 | The countdown shows the wrong time | The computer's clock is wrong. | Fix the clock. On a server, see [HOSTING.md](HOSTING.md). |
 | The ring looks blurred for a moment when it first appears or changes | Discord shows a blurred preview of every new picture until it has loaded. A slow connection makes it last longer. | Nothing to fix: it sharpens once loaded. The ring changes once a minute to keep this rare. |
+| The timer stays above new messages instead of moving down | The bot can't post in the channel. The log says `Could not move the timer down`. | Open the invite link from Step 3 again. |
 | The timer shows text but no ring | The bot is missing Attach Files (the log names it at startup), or drawing failed (the log says `Could not draw the countdown ring`). | Open the invite link from Step 3 again. For a drawing error, check `uv sync` finished without errors. |
 | Timers run far too fast | `SECONDS_PER_MINUTE` is still set for testing. | Set it back to 60 in `constants.py` and restart. |
 | Channels get deleted right after they're created, or everything happens twice | Two copies of the bot are running, perhaps one on your computer and one on a server. Each sees the other's channels as leftovers. | Stop one of them. |

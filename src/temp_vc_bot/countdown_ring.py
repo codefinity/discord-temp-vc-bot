@@ -13,7 +13,11 @@ import math
 from PIL import Image, ImageDraw, ImageFont
 
 FILENAME = "countdown.png"  # The embed points at the attachment by this name.
-SIZE = 512  # Width and height of the finished image, in pixels.
+# Width and height of the finished image, in pixels. Discord shrinks a bigger
+# picture to fit the embed (about 300 pixels tall on desktop) but shows one this
+# small at its real size, so this sets how big the ring looks. 150 is half of
+# the roughly 300 that the earlier 512 was shown at.
+SIZE = 150
 # Pillow doesn't smooth the edges of circles, so the dial is drawn this many times
 # larger and then shrunk, which does.
 SUPERSAMPLE = 3

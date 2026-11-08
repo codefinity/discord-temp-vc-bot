@@ -11,10 +11,13 @@ from .state import SessionRegistry
 
 
 def build_intents() -> discord.Intents:
-    """Ask Discord for only the events the bot needs. Neither of these is privileged."""
+    """Ask Discord for only the events the bot needs. None of these is privileged."""
     intents = discord.Intents.none()
     intents.guilds = True  # The server's channels and roles.
     intents.voice_states = True  # Who joins and leaves voice channels.
+    # That a message was posted, so the timer can move back below it. The bot never
+    # reads what people write, so it doesn't need the privileged Message Content intent.
+    intents.guild_messages = True
     return intents
 
 
@@ -33,7 +36,8 @@ class TempVCBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions.none(),
             # See the note on this constant. Rename limits depend on it.
             max_ratelimit_timeout=MAX_RATE_LIMIT_WAIT_SECONDS,
-            # The bot doesn't receive message events, so a message cache would stay empty.
+            # The bot only needs to know that a message was posted, never to look one
+            # up later, so it keeps no message cache.
             max_messages=None,
         )
         self.settings = settings
@@ -44,3 +48,10 @@ class TempVCBot(commands.Bot):
     async def setup_hook(self) -> None:
         """Runs once before the bot connects. Loads the event handlers."""
         await self.load_extension("temp_vc_bot.cogs.voice_events")
+
+    async def on_message(self, message: discord.Message, /) -> None:
+        """Skip discord.py's search for a text command in every message.
+
+        The bot has none, so the search would only log an error each time someone
+        @mentions it. The cog still hears about every message.
+        """
