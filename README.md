@@ -2,7 +2,7 @@
 
 A Discord bot that gives each member their own voice channel on a timer.
 
-A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to name the channel: if they don't within 2 minutes, the channel is deleted. While they own it, the owner has a 👑 in front of their name. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to give the channel a name and a status: if they don't within 2 minutes, the channel is deleted. While they own it, the owner has a 👑 in front of their name. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
 
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
@@ -30,14 +30,14 @@ temp-vc-bot/
 │   ├── cogs/
 │   │   └── voice_events.py     Hub joins, people joining and leaving, startup
 │   ├── services/
-│   │   ├── channel_manager.py  Create, delete, rename, lock, limit, owner's crown
+│   │   ├── channel_manager.py  Create, delete, rename, status, lock, limit, owner's crown
 │   │   ├── naming.py           Deletes a channel that isn't named in time (added)
 │   │   └── timer.py            Countdown, extension, auto-close
 │   └── views/
 │       ├── owner_only.py       Shared owner-only check (added)
 │       ├── name_prompt.py      "Name your channel" button (added)
 │       ├── control_panel.py    Rename, limit, lock, timer and end controls
-│       ├── modals.py           Rename and user limit forms
+│       ├── modals.py           Name-and-status and user limit forms
 │       ├── extend_prompt.py    Yes and No extension buttons
 │       └── end_confirm.py      "End now?" question before ending early (added)
 └── tests/                      Automated tests (added)
@@ -88,6 +88,7 @@ These don't conflict with the brief, but the bot would fail without handling the
 
 - **Renames could hang for 10 minutes.** By default, discord.py quietly sleeps through a rate limit, so a rename would appear to do nothing. The bot sets `max_ratelimit_timeout`, which makes the library raise an error instead, and the owner sees "try again in about 9 minutes". Discord doesn't document the rename limit, so the bot relies on Discord's own answer and doesn't count renames itself.
 - **That setting allowed only one new channel per day.** Discord counts new channels over 24 hours. With `max_ratelimit_timeout` set, discord.py refused every channel after the first until that window ended, even though Discord would have allowed more, and the log showed "Too many requests. Retry in 86251 seconds". [ratelimit_fix.py](src/temp_vc_bot/ratelimit_fix.py) lets requests through while Discord says some are left. When none are left, the member gets "try again later" in the hub straight away.
+- **Setting a status without joining needs two permissions.** [Discord requires Manage Channels as well as Set Voice Channel Status](https://docs.discord.com/developers/resources/channel) from anyone not connected to the channel, which includes this bot. Its overwrite grants both. An overwrite can't grant a permission the bot lacks in the server, and Discord would refuse the whole overwrite, so a bot invited with an older link leaves Set Voice Channel Status out. Everything except the status keeps working, naming included, and the startup log says what's missing.
 - **Losing Connect removes other permissions.** [Denying Connect also denies Manage Channel](https://docs.discord.com/developers/topics/permissions). The bot's own Connect overwrite is what lets it still manage and delete a locked channel.
 - **A channel nobody entered gets no "leave" event.** If the owner leaves voice before the bot can move them in, the bot deletes the new channel at once. Otherwise it would stay forever.
 - **The bot can reconnect at any time.** Discord may fire `on_ready` more than once, and discord.py then replaces its cached objects. So startup cleanup runs only once, sessions store IDs instead of objects, and the bot catches up on anything it missed while disconnected.
@@ -117,6 +118,10 @@ The brief left these open. Each one is easy to change.
 - A name Discord refuses doesn't count. The prompt stays, so the owner can try another.
 - The prompt shows the deadline as a fixed time, not a live countdown, for the same reason as the timer.
 - If the bot can't post the prompt, it doesn't delete the channel for being unnamed.
+- The naming form also asks for a status, the line Discord shows under a voice channel's name, and won't submit without one. The control panel's **Rename** form has the same required box, filled in with the current status, so a status can be changed but not removed. A status of only spaces gets a message, like a name of only spaces.
+- A status isn't a rename, so it doesn't use up one of the renames. The bot sets the status first. If Discord refuses it, the bot stops there: no rename is used up, and an unnamed channel stays unnamed, so the owner can try another. A rename that's refused or rate limited doesn't undo the status.
+- If the status can't be set for a reason that's the bot's problem rather than the owner's, the name still counts. That's a missing Set Voice Channel Status permission or a Discord rate limit. Otherwise, on an older invite, every channel would be deleted for something its owner can't fix. The owner is told the status wasn't set.
+- Discord doesn't include a channel's status with the channel, so the form shows the last status set through the bot. The bot only sends the status when the owner changes the box, so leaving it alone never overwrites a status someone in the channel set from Discord itself.
 
 **Ownership**
 
@@ -136,7 +141,7 @@ The brief left these open. Each one is easy to change.
 
 - The panel and the timer are two separate messages, so each can update on its own.
 - The panel message tags the owner, so they notice it. Anyone in the chat can see it.
-- Besides the four permissions in its overwrite, the bot also gives itself Send Messages, Embed Links and Attach Files on each channel, so a category's settings can't stop it posting the panel or the countdown ring.
+- Besides the four permissions in its overwrite, the bot also gives itself Send Messages, Embed Links, Attach Files and Set Voice Channel Status on each channel, so a category's settings can't stop it posting the panel or the countdown ring, or setting a status.
 - The lock button's label shows the state and the action, such as "Unlocked (click to lock)", so nobody reads "Locked" as a command.
 - Setting a limit lower than the number of people inside removes nobody. It only stops new people joining.
 - **End discussion** lets the owner delete the channel before time runs out. Ending can't be undone and disconnects everyone, so the button only asks a private "End now?" question first. An unanswered question expires after 60 seconds (`END_CONFIRM_SECONDS`) and leaves the channel alone. The button works in every phase, including before the timer starts.

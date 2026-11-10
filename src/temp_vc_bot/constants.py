@@ -50,6 +50,8 @@ def minutes_to_delta(minutes: float) -> timedelta:
 # ---------------------------------------------------------------------------
 MIN_CHANNEL_NAME_LENGTH = 1
 MAX_CHANNEL_NAME_LENGTH = 100
+# A voice channel's status is the line Discord shows under its name in the channel list.
+MAX_CHANNEL_STATUS_LENGTH = 500
 NO_USER_LIMIT = 0  # Discord treats a user limit of 0 as "no limit".
 MAX_USER_LIMIT = 99  # The most seats a voice channel can have.
 MAX_NICKNAME_LENGTH = 32
@@ -71,6 +73,8 @@ DELETE_ATTEMPTS = 3  # Tries at deleting a channel while being rate limited.
 # ---------------------------------------------------------------------------
 # The name a channel has until its owner names it.
 CHANNEL_NAME_TEMPLATE = "{name}'s VC"
+# Owners must give a status along with the name. Discord itself allows none.
+MIN_CHANNEL_STATUS_LENGTH = 1
 # Put in front of the owner's nickname while they own a channel, so people can
 # see who it is. Changing this also changes what the startup cleanup looks for.
 OWNER_CROWN = "👑 "
@@ -81,6 +85,9 @@ OWNER_CROWN = "👑 "
 RENAME_LABEL = "Rename"
 NAME_BUTTON_LABEL = "Name your channel"
 NAME_FORM_TITLE = "Name your channel"
+# The second box in the naming and rename forms. The owner has to fill it in.
+STATUS_FIELD_LABEL = "Channel status"
+STATUS_FIELD_PLACEHOLDER = "Shown under the channel's name, e.g. Revising for exams"
 USER_LIMIT_LABEL = "User limit"
 # The lock button's label shows the current state, as the brief asks. It also
 # says what a click does, so nobody mistakes "Locked" for the action.
@@ -113,6 +120,14 @@ END_EXPIRED_MESSAGE = "No answer, so the channel stays open. Click End discussio
 TIMER_ALREADY_STARTED_MESSAGE = "The timer has already started, so its length can't be changed."
 INVALID_NAME_MESSAGE = f"Please enter a name with {MIN_CHANNEL_NAME_LENGTH}–{MAX_CHANNEL_NAME_LENGTH} characters."
 REJECTED_NAME_MESSAGE = "Discord rejected that name. Please try a different one."
+INVALID_STATUS_MESSAGE = (
+    f"Please enter a status with {MIN_CHANNEL_STATUS_LENGTH}–{MAX_CHANNEL_STATUS_LENGTH} characters."
+)
+REJECTED_STATUS_MESSAGE = "Discord rejected that status. Please try a different one."
+STATUS_PERMISSION_MESSAGE = (
+    "I couldn't set the status because I'm missing the Set Voice Channel Status permission. "
+    "Please ask a server admin to open the bot's invite link again."
+)
 INVALID_LIMIT_MESSAGE = (
     f"Please enter a whole number from {NO_USER_LIMIT} to {MAX_USER_LIMIT}. {NO_USER_LIMIT} means no limit."
 )

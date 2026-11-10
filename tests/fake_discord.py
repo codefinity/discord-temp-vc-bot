@@ -53,9 +53,12 @@ SPEAK = 1 << 21
 MOVE_MEMBERS = 1 << 24
 MANAGE_NICKNAMES = 1 << 27
 MANAGE_ROLES = 1 << 28
+SET_VOICE_CHANNEL_STATUS = 1 << 48
 
 # The exact number in the invite link in DEPLOYMENT.md.
-INVITE_PERMISSIONS = 420531216
+INVITE_PERMISSIONS = 281475397241872
+# The number in the link before Set Voice Channel Status was added, for testing older invites.
+OLD_INVITE_PERMISSIONS = 420531216
 EVERYONE_PERMISSIONS = VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | READ_MESSAGE_HISTORY | CONNECT | SPEAK
 
 GUILD_ID = 1000
@@ -149,6 +152,9 @@ class FakeDiscord:
         self.identify: dict[str, Any] | None = None
         self.identify_count = 0
         self.renames: defaultdict[int, list[float]] = defaultdict(list)
+        # Channel ID -> the line shown under its name. Discord keeps it outside the channel object.
+        self.voice_statuses: dict[int, str | None] = {}
+        self.rate_limit_statuses = False  # Tests can make every status request get a long 429.
         # Tests can use this to make the second rename report an exhausted bucket,
         # as Discord's headers can. discord.py used to sleep for 10 minutes on that.
         self.report_exhausted_rename_bucket = False
@@ -450,11 +456,19 @@ class FakeDiscord:
         return await self._interact(3, member_id, message, data)
 
     async def submit_modal(
-        self, member_id: int, message: dict[str, Any], modal: dict[str, Any], value: str
+        self, member_id: int, message: dict[str, Any], modal: dict[str, Any], *values: str
     ) -> InteractionRecord:
-        """A person types `value` into a form's text box and submits it."""
-        text_box = _find_all(modal, "type", TEXT_INPUT)[0]
-        rows = [{"type": 1, "components": [{"type": TEXT_INPUT, "custom_id": text_box["custom_id"], "value": value}]}]
+        """A person types `values` into a form's text boxes, in order, and submits it.
+
+        Boxes not given a value keep what the form filled in, because Discord sends every box.
+        """
+        text_boxes = _find_all(modal, "type", TEXT_INPUT)
+        assert len(values) <= len(text_boxes), "The form has fewer boxes than that."
+        typed = [*values, *(box.get("value") or "" for box in text_boxes[len(values) :])]
+        rows = [
+            {"type": 1, "components": [{"type": TEXT_INPUT, "custom_id": box["custom_id"], "value": value}]}
+            for box, value in zip(text_boxes, typed, strict=True)
+        ]
         data = {"custom_id": modal["custom_id"], "components": rows}
         return await self._interact(5, member_id, message, data)
 
@@ -525,6 +539,7 @@ class FakeDiscord:
             ("PUT", "/channels/{channel_id}/permissions/{target_id}", self._set_overwrite),
             ("DELETE", "/channels/{channel_id}/permissions/{target_id}", self._delete_overwrite),
             ("PATCH", "/channels/{channel_id}", self._edit_channel),
+            ("PUT", "/channels/{channel_id}/voice-status", self._set_voice_status),
             ("DELETE", "/channels/{channel_id}", self._delete_channel),
             ("POST", "/channels/{channel_id}/messages", self._create_message),
             ("PATCH", "/channels/{channel_id}/messages/{message_id}", self._edit_message),
@@ -836,6 +851,32 @@ class FakeDiscord:
             )
         return None
 
+    async def _set_voice_status(self, request: web.Request, body: dict[str, Any]) -> web.Response:
+        channel_id = int(request.match_info["channel_id"])
+        if channel_id not in self.channels:
+            return _error(404, 10003, "Unknown Channel")
+        # "Requires the SET_VOICE_CHANNEL_STATUS permission, and additionally the
+        # MANAGE_CHANNELS permission if the current user is not connected to the voice channel."
+        needed = SET_VOICE_CHANNEL_STATUS
+        if self.voice.get(BOT_USER_ID) != channel_id:
+            needed |= MANAGE_CHANNELS
+        if self.effective_permissions(channel_id, BOT_USER_ID) & needed != needed:
+            return _error(403, 50013, "Missing Permissions")
+        if self.rate_limit_statuses:
+            return _json(
+                {"message": "You are being rate limited.", "retry_after": RENAME_RETRY_AFTER_SECONDS, "global": False},
+                status=429,
+                headers={"Via": "1.1 google", "Retry-After": str(int(RENAME_RETRY_AFTER_SECONDS))},
+            )
+        status = body.get("status")
+        if status is not None and (len(status) > 500 or "banned-word" in status):
+            return _error(400, 50035, "Invalid Form Body")
+        self.voice_statuses[channel_id] = status or None
+        await self._dispatch(
+            "VOICE_CHANNEL_STATUS_UPDATE", {"id": str(channel_id), "guild_id": str(GUILD_ID), "status": status}
+        )
+        return web.Response(status=204)
+
     async def _delete_channel(self, request: web.Request, body: dict[str, Any]) -> web.Response:
         channel_id = int(request.match_info["channel_id"])
         if channel_id not in self.channels:
@@ -997,3 +1038,8 @@ def _find_all(tree: Any, key: str, value: Any) -> list[dict[str, Any]]:
 def find_component(message: dict[str, Any], key: str, value: Any) -> dict[str, Any]:
     """Find one button or dropdown in a message."""
     return _find_all(message, key, value)[0]
+
+
+def find_components(message: dict[str, Any], key: str, value: Any) -> list[dict[str, Any]]:
+    """Find every matching component, such as each text box in a form, in order."""
+    return _find_all(message, key, value)

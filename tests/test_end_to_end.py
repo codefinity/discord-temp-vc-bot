@@ -34,13 +34,17 @@ from .fake_discord import (
     MANAGE_NICKNAMES,
     MANAGE_ROLES,
     MOVE_MEMBERS,
+    OLD_INVITE_PERMISSIONS,
     SEND_MESSAGES,
+    SET_VOICE_CHANNEL_STATUS,
     VIEW_CHANNEL,
     FakeDiscord,
     find_component,
+    find_components,
 )
 
 NOT_OWNER = "Only the channel owner can do this."
+STATUS = "Chatting"  # The naming and rename forms need a status as well as a name.
 
 
 async def make_vc(world: FakeDiscord, name: str = "Alice") -> tuple[int, int]:
@@ -259,17 +263,17 @@ class TestRename:
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
         assert click.modal["components"]
-        result = await world.submit_modal(owner, panel, click.modal, "Movie night")
+        result = await world.submit_modal(owner, panel, click.modal, "Movie night", STATUS)
         assert world.channels[channel_id]["name"] == "Movie night"
         assert "Movie night" in result.private_texts()[0]
 
-    @pytest.mark.parametrize(("button", "value"), [("Rename", "Movie night"), ("User limit", "5")])
-    async def test_owner_sees_a_private_thinking_state_while_a_form_is_processed(self, world: FakeDiscord, bot: TempVCBot, button: str, value: str) -> None:
+    @pytest.mark.parametrize(("button", "values"), [("Rename", ("Movie night", STATUS)), ("User limit", ("5",))])
+    async def test_owner_sees_a_private_thinking_state_while_a_form_is_processed(self, world: FakeDiscord, bot: TempVCBot, button: str, values: tuple[str, ...]) -> None:
         # Otherwise nothing appears after Submit, and a short rate limit can take 30 seconds.
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, button)
-        result = await world.submit_modal(owner, panel, click.modal, value)
+        result = await world.submit_modal(owner, panel, click.modal, *values)
         first_response = result.responses[0]
         assert first_response["type"] == 5, "Type 5 is the 'thinking' state."
         assert first_response["data"]["flags"] & 64, "It must be private."
@@ -285,14 +289,14 @@ class TestRename:
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
-        await world.submit_modal(owner, panel, click.modal, "x" * 100)
+        await world.submit_modal(owner, panel, click.modal, "x" * 100, STATUS)
         assert world.channels[channel_id]["name"] == "x" * 100
 
     async def test_name_of_only_spaces_is_rejected_with_a_message(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
-        result = await world.submit_modal(owner, panel, click.modal, "   ")
+        result = await world.submit_modal(owner, panel, click.modal, "   ", STATUS)
         assert world.channels[channel_id]["name"] == "Alice's VC"
         assert "1–100" in result.private_texts()[0]
 
@@ -300,7 +304,7 @@ class TestRename:
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
-        result = await world.submit_modal(owner, panel, click.modal, "banned-word")
+        result = await world.submit_modal(owner, panel, click.modal, "banned-word", STATUS)
         assert "rejected" in result.private_texts()[0]
 
     @pytest.mark.parametrize("exhausted_bucket", [False, True])
@@ -311,9 +315,9 @@ class TestRename:
         started = time.monotonic()
         for name in ("First", "Second"):
             click = await world.click(owner, panel, "Rename")
-            await world.submit_modal(owner, panel, click.modal, name)
+            await world.submit_modal(owner, panel, click.modal, name, STATUS)
         click = await world.click(owner, panel, "Rename")
-        result = await world.submit_modal(owner, panel, click.modal, "Third")
+        result = await world.submit_modal(owner, panel, click.modal, "Third", STATUS)
 
         assert world.channels[channel_id]["name"] == "Second"
         assert result.private_texts() == ["Discord only allows about 2 renames per 10 minutes for each channel. Please try again in about 9 minutes."]
@@ -323,7 +327,7 @@ class TestRename:
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
-        result = await world.submit_modal(owner, panel, click.modal, "@everyone")
+        result = await world.submit_modal(owner, panel, click.modal, "@everyone", STATUS)
         assert "@everyone" in result.private_texts()[0]
         assert result.followups[-1]["allowed_mentions"]["parse"] == [], "The reply must not be able to ping anyone."
 
@@ -331,7 +335,7 @@ class TestRename:
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
-        await world.submit_modal(owner, panel, click.modal, "Alice's VC")
+        await world.submit_modal(owner, panel, click.modal, "Alice's VC", STATUS)
         assert world.renames[channel_id] == []
 
 
@@ -456,7 +460,7 @@ class TestLock:
         panel = world.panel_message(channel_id)
         await world.click(owner, panel, "Unlocked (click to lock)")
         click = await world.click(owner, world.panel_message(channel_id), "Rename")
-        await world.submit_modal(owner, panel, click.modal, "Locked room")
+        await world.submit_modal(owner, panel, click.modal, "Locked room", STATUS)
         assert world.channels[channel_id]["name"] == "Locked room"
         await world.leave_voice(owner)
         await world.settle()
@@ -1182,12 +1186,12 @@ def naming_prompt(world: FakeDiscord, channel_id: int) -> dict[str, Any] | None:
     return None
 
 
-async def name_it(world: FakeDiscord, owner: int, channel_id: int, name: str) -> InteractionRecord:
-    """The owner clicks the naming button and submits `name`."""
+async def name_it(world: FakeDiscord, owner: int, channel_id: int, name: str, status: str = STATUS) -> InteractionRecord:
+    """The owner clicks the naming button and submits `name` and `status`."""
     prompt = naming_prompt(world, channel_id)
     assert prompt is not None, "There is no naming prompt."
     click = await world.click(owner, prompt, NAME_BUTTON)
-    return await world.submit_modal(owner, prompt, click.modal, name)
+    return await world.submit_modal(owner, prompt, click.modal, name, status)
 
 
 class TestNamingDeadline:
@@ -1251,7 +1255,7 @@ class TestNamingDeadline:
         owner, channel_id = await make_vc(world)
         panel = world.panel_message(channel_id)
         click = await world.click(owner, panel, "Rename")
-        await world.submit_modal(owner, panel, click.modal, "Study group")
+        await world.submit_modal(owner, panel, click.modal, "Study group", STATUS)
         await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
         await asyncio.sleep(PAST_THE_DEADLINE)
         assert channel_id in world.channels
@@ -1268,7 +1272,9 @@ class TestNamingDeadline:
     async def test_a_name_discord_refuses_does_not_count(self, world: FakeDiscord, bot: TempVCBot) -> None:
         owner, channel_id = await make_vc(world)
         result = await name_it(world, owner, channel_id, "banned-word")
-        assert result.private_texts() == ["Discord rejected that name. Please try a different one."]
+        assert result.private_texts() == [
+            f"Discord rejected that name. Please try a different one.\n✅ Status set to **{STATUS}**."
+        ]
         assert naming_prompt(world, channel_id) is not None, "The owner can still try another name."
         await world.wait_for(lambda: channel_id not in world.channels)
 
@@ -1289,6 +1295,169 @@ class TestNamingDeadline:
         expected = [world.panel_message(channel_id), naming_prompt(world, channel_id), world.timer_message(channel_id)]
         assert in_order == [message["id"] for message in expected]
         assert world.request_count("DELETE", f"/channels/{channel_id}/messages") == 0
+
+
+def status_box(modal: dict[str, Any]) -> dict[str, Any]:
+    """The second text box in the naming and rename forms."""
+    boxes = find_components(modal, "type", 4)
+    assert len(boxes) == 2, "The form should ask for a name and a status."
+    return boxes[1]
+
+
+def status_requests(world: FakeDiscord, channel_id: int) -> list[dict[str, Any]]:
+    """The body of every request the bot made to set this channel's status."""
+    return [body for method, path, body in world.requests if method == "PUT" and path.endswith(f"/channels/{channel_id}/voice-status")]
+
+
+class TestChannelStatus:
+    @pytest.mark.parametrize("where", ["naming prompt", "control panel"])
+    async def test_both_forms_require_a_status(self, world: FakeDiscord, bot: TempVCBot, where: str) -> None:
+        owner, channel_id = await make_vc(world)
+        if where == "naming prompt":
+            click = await world.click(owner, naming_prompt(world, channel_id), NAME_BUTTON)
+        else:
+            click = await world.click(owner, world.panel_message(channel_id), "Rename")
+        box = status_box(click.modal)
+        assert box["required"] is True, "Discord won't let the owner submit the form without one."
+        assert (box["min_length"], box["max_length"]) == (1, 500)
+        assert "status" in box["label"].lower()
+        assert not box.get("value"), "A new channel has no status yet."
+
+    async def test_naming_with_a_status_sets_both(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "Study group", "  Revising for exams  ")
+        assert world.channels[channel_id]["name"] == "Study group"
+        assert world.voice_statuses[channel_id] == "Revising for exams", "Spaces at the ends are trimmed."
+        assert result.private_texts() == [
+            "✅ Channel renamed to **Study group**.\n✅ Status set to **Revising for exams**."
+        ]
+        await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
+
+    async def test_the_bot_sets_the_status_without_joining_the_channel(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # The fake only allows this with Manage Channels as well, as Discord documents.
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Study group", "Revising")
+        assert world.voice_statuses[channel_id] == "Revising"
+        assert BOT_USER_ID not in world.voice
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_a_status_of_only_spaces_is_refused_and_the_channel_stays_unnamed(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # Discord's form counts spaces as characters, so this gets past "required".
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "Study group", "   ")
+        assert result.private_texts() == ["Please enter a status with 1–500 characters."]
+        assert world.channels[channel_id]["name"] == "Alice's VC"
+        assert status_requests(world, channel_id) == [] and world.renames[channel_id] == []
+        assert naming_prompt(world, channel_id) is not None, "The owner can try again."
+        await world.wait_for(lambda: channel_id not in world.channels)
+
+    async def test_a_blank_name_is_reported_before_a_blank_status(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "   ", "   ")
+        assert result.private_texts() == ["Please enter a name with 1–100 characters."]
+
+    async def test_setting_a_status_does_not_use_up_a_rename(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Study group", "Revising")
+        panel = world.panel_message(channel_id)
+        for status in ("Chapter 2", "Chapter 3", "Chapter 4"):
+            click = await world.click(owner, panel, "Rename")
+            await world.submit_modal(owner, panel, click.modal, "Study group", status)
+        assert world.voice_statuses[channel_id] == "Chapter 4"
+        assert len(world.renames[channel_id]) == 1, "Only the naming was a rename."
+
+    async def test_the_panel_form_shows_the_status_and_leaving_it_alone_sends_nothing(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Study group", "Revising")
+        panel = world.panel_message(channel_id)
+        click = await world.click(owner, panel, "Rename")
+        assert status_box(click.modal)["value"] == "Revising"
+        result = await world.submit_modal(owner, panel, click.modal, "Movie night")
+        assert world.channels[channel_id]["name"] == "Movie night"
+        assert status_requests(world, channel_id) == [{"status": "Revising"}], "An unchanged status isn't sent again."
+        assert result.private_texts() == ["✅ Channel renamed to **Movie night**."]
+
+    async def test_the_panel_form_cannot_remove_the_status(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Study group", "Revising")
+        panel = world.panel_message(channel_id)
+        click = await world.click(owner, panel, "Rename")
+        result = await world.submit_modal(owner, panel, click.modal, "Movie night", "   ")
+        assert result.private_texts() == ["Please enter a status with 1–500 characters."]
+        assert world.voice_statuses[channel_id] == "Revising"
+        assert world.channels[channel_id]["name"] == "Study group", "Nothing changes."
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_a_status_discord_refuses_stops_the_naming_before_the_rename(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "Study group", "banned-word")
+        assert result.private_texts() == ["Discord rejected that status. Please try a different one."]
+        assert world.channels[channel_id]["name"] == "Alice's VC"
+        assert world.renames[channel_id] == [], "A refused status mustn't use up a rename."
+        assert naming_prompt(world, channel_id) is not None, "The owner can try another status."
+        await world.wait_for(lambda: channel_id not in world.channels)
+
+    async def test_the_owner_can_name_it_after_a_refused_status(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Study group", "banned-word")
+        result = await name_it(world, owner, channel_id, "Study group", "Revising")
+        assert world.channels[channel_id]["name"] == "Study group"
+        assert world.voice_statuses[channel_id] == "Revising"
+        assert result.private_texts() == ["✅ Channel renamed to **Study group**.\n✅ Status set to **Revising**."]
+        await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
+
+    async def test_a_rate_limited_status_does_not_stop_the_naming(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # The limit is the bot's problem, not the owner's, so it mustn't get the channel deleted.
+        world.rate_limit_statuses = True
+        owner, channel_id = await make_vc(world)
+        started = time.monotonic()
+        result = await name_it(world, owner, channel_id, "Study group", "Revising")
+        assert time.monotonic() - started < 10, "A rate limit must not make the form hang."
+        assert world.channels[channel_id]["name"] == "Study group"
+        assert channel_id not in world.voice_statuses
+        assert result.private_texts() == [
+            "✅ Channel renamed to **Study group**.\n"
+            "Discord is limiting how fast I can do that. Please try again in about 9 minutes."
+        ]
+        await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
+
+    async def test_a_status_is_set_even_when_the_rename_is_rate_limited(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        panel = world.panel_message(channel_id)
+        for name in ("First", "Second"):
+            click = await world.click(owner, panel, "Rename")
+            await world.submit_modal(owner, panel, click.modal, name, STATUS)
+        click = await world.click(owner, panel, "Rename")
+        result = await world.submit_modal(owner, panel, click.modal, "Third", "Revising")
+        assert world.channels[channel_id]["name"] == "Second"
+        assert world.voice_statuses[channel_id] == "Revising"
+        assert result.private_texts()[0].startswith("Discord only allows about 2 renames")
+        assert result.private_texts()[0].endswith("✅ Status set to **Revising**.")
+
+    async def test_a_status_like_at_everyone_cannot_ping_anybody(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "Study group", "@everyone")
+        assert "@everyone" in result.private_texts()[0]
+        assert result.followups[-1]["allowed_mentions"]["parse"] == []
+
+    async def test_an_invite_from_before_the_status_still_creates_channels(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
+        # Discord refuses an overwrite granting a permission the bot lacks, which would
+        # otherwise stop every channel being created.
+        world.bot_permissions = OLD_INVITE_PERMISSIONS
+        await start_bot()
+        assert "missing Set Voice Channel Status, so owners can't set a channel status" in caplog.text
+        owner, channel_id = await make_vc(world)
+        assert not int(world.overwrite_on(channel_id, BOT_USER_ID)["allow"]) & SET_VOICE_CHANNEL_STATUS
+        result = await name_it(world, owner, channel_id, "Study group", "Revising")
+        assert world.channels[channel_id]["name"] == "Study group", "Naming still works."
+        assert channel_id not in world.voice_statuses
+        assert "missing the Set Voice Channel Status permission" in result.private_texts()[0]
+        await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
+
+    async def test_the_bot_grants_itself_the_status_permission_on_each_channel(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # So a category that denies it can't stop owners setting a status.
+        _, channel_id = await make_vc(world)
+        assert int(world.overwrite_on(channel_id, BOT_USER_ID)["allow"]) & SET_VOICE_CHANNEL_STATUS
 
 
 def nickname_edits(world: FakeDiscord) -> list[dict[str, Any]]:
@@ -1432,9 +1601,12 @@ class TestDiscordSizeLimits:
         owner, channel_id = await make_vc(world)
         click = await world.click(owner, world.panel_message(channel_id), button)
         assert len(click.modal["title"]) <= 45
-        text_box = find_component(click.modal, "type", 4)
-        assert len(text_box["label"]) <= 45
-        assert text_box["min_length"] <= len(text_box["value"]) <= text_box["max_length"], "The pre-filled value must fit too."
+        for text_box in find_components(click.modal, "type", 4):
+            assert len(text_box["label"]) <= 45
+            assert len(text_box.get("placeholder", "")) <= 100
+            value = text_box.get("value")
+            if value is not None:
+                assert text_box.get("min_length", 0) <= len(value) <= text_box["max_length"], "The pre-filled value must fit too."
 
     async def test_a_very_long_display_name_still_makes_a_valid_channel_name(self, world: FakeDiscord, bot: TempVCBot) -> None:
         _, channel_id = await make_vc(world, "x" * 200)
@@ -1500,6 +1672,6 @@ class TestErrors:
         click = await world.click(owner, panel, "Rename")
         session = bot.sessions.by_owner(owner)
         bot.channel_manager.guild._channels.pop(channel_id)  # As if the delete just happened.
-        result = await world.submit_modal(owner, panel, click.modal, "New name")
+        result = await world.submit_modal(owner, panel, click.modal, "New name", STATUS)
         assert "no longer exists" in result.private_texts()[0]
         assert session is not None
