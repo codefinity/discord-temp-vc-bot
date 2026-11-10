@@ -67,7 +67,7 @@ The end of the link, `scope=bot+applications.commands`, adds the bot to your ser
 | Permission | Why the bot needs it |
 |---|---|
 | **View Channels** | To see the hub, the category, the temporary channels and the topic channel. |
-| **Manage Channels** | To create, rename, set limits on and delete temporary channels. |
+| **Manage Channels** | To create, rename, set limits on and delete temporary channels, and to set the topic of #find-your-group to a short guide to /topic. |
 | **Manage Roles** | To control who can connect, which is how Lock works. On a channel, Discord calls this same permission "Manage Permissions". The bot never edits your server's roles. |
 | **Connect** | The bot never joins voice, but Discord won't let anyone edit a voice channel they can't connect to. Without this, the bot couldn't manage a locked channel. |
 | **Move Members** | To move people from the hub into their channel. |
@@ -89,7 +89,7 @@ The bot doesn't need Administrator. Please don't give it that, since the bot wor
 
 1. In your Discord server, right-click the channel list and choose **Create Category**. Name it something like "Temp VCs".
 2. Create a voice channel named **Create Your Own VC**. This is the hub. It can go inside the new category or anywhere else.
-3. Create a text channel named **find-your-group**, or use one you already have. This is where members use **/topic**. It can go anywhere, and the bot needs to be able to see it and send messages there.
+3. Create a text channel named **find-your-group**, or use one you already have. This is where members use **/topic**. It can go anywhere, and the bot needs to be able to see it, edit it and send messages there. When the bot starts, it sets this channel's topic, the line at the top of the channel next to its name, to a short guide to **/topic**.
 
 **Three rules for the category:**
 
@@ -191,7 +191,7 @@ You can share this section with your server.
 
 **When a channel closes,** everyone in it is disconnected and the channel is deleted. This also happens the moment the last person leaves, or when you end the discussion, whatever the timer says.
 
-**Finding a group with /topic:** in **#find-your-group**, type `/topic` and press Enter.
+**Finding a group with /topic:** in **#find-your-group**, type `/topic` and press Enter. The line at the top of the channel, next to its name, explains this too.
 
 1. A form asks for the channel's name, its status, and what you want to discuss. All three are required.
 2. You see a card that only you can see. **Edit** changes what you typed.
@@ -252,6 +252,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 **/topic**
 
+- [ ] **Channel topic:** open #find-your-group. The line at the top, next to the channel's name, explains /topic and asks people not to write anything else there. The bot posts nothing about it in the chat.
 - [ ] **Wrong channel:** type `/topic` in another channel. Only you see a note saying where to use it.
 - [ ] **Form:** type `/topic` in #find-your-group. A form asks for a channel name, a status and a topic, and won't submit with an empty box.
 - [ ] **Private card:** submit it. A card appears that says only you can see it, and your friend can't see it. Click **Edit**, change the topic and submit. The card updates.
@@ -300,6 +301,8 @@ If there's no message at all, make sure you restarted the bot after editing `.en
 | The log says `TOPIC_CHANNEL_ID ... is not a text channel` | That ID is wrong. Copy the find-your-group channel's ID again. |
 | `/topic` says it only works in another channel | You're in a different channel from the one in `TOPIC_CHANNEL_ID`, or that ID is wrong. |
 | **Advertise** says the bot doesn't have permission | The bot can't post in the topic channel. The startup log names what's missing. Check the channel's **Permissions** for anything that denies the bot's role. |
+| The line at the top of #find-your-group doesn't explain /topic | The bot can't edit the channel. The log says `Could not set the topic channel's topic`, and the startup log names the missing permission. Check the channel's **Permissions** for anything that denies Manage Channels to the bot's role, then restart the bot. |
+| You changed #find-your-group's topic, and it changed back | The bot sets it on every start. To change the wording, edit `TOPIC_CHANNEL_DESCRIPTION` in `src/temp_vc_bot/constants.py` and restart the bot. |
 
 ### Missing permissions
 

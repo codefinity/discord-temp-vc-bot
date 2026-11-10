@@ -36,7 +36,7 @@ def build_topic_embed(topic: Topic) -> discord.Embed:
 
     Mentions in an embed never ping anyone, so listing people here is safe.
     """
-    embed = discord.Embed(title=f"💬 {topic.name}", description=topic.text, colour=discord.Colour.blurple())
+    embed = discord.Embed(title=f"💬 {topic.name}", description=topic.text, colour=discord.Colour.red())
     embed.add_field(name="Status", value=topic.status, inline=False)
     embed.add_field(name="Started by", value=f"<@{topic.host_id}>")
     embed.add_field(name=f"Interested ({len(topic.interested_ids)})", value=interested_list(topic))

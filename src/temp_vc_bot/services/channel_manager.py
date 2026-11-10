@@ -39,9 +39,11 @@ REQUIRED_HUB_PERMISSIONS = {
     "view_channel": "View Channels",
     "move_members": "Move Members",
 }
-# What the bot needs in the topic channel, to post topic cards and invites.
+# What the bot needs in the topic channel, to post topic cards and invites, and to
+# set the channel's topic to the guide to /topic.
 REQUIRED_TOPIC_CHANNEL_PERMISSIONS = {
     "view_channel": "View Channels",
+    "manage_channels": "Manage Channels",
     "send_messages": "Send Messages",
     "embed_links": "Embed Links",
 }

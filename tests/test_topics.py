@@ -6,10 +6,11 @@ import asyncio
 import logging
 from typing import Any
 
+import discord
 import pytest
 
 from temp_vc_bot.bot import TempVCBot
-from temp_vc_bot.constants import MAX_INTERESTED_SHOWN
+from temp_vc_bot.constants import MAX_INTERESTED_SHOWN, TOPIC_CHANNEL_DESCRIPTION
 from temp_vc_bot.services import topics
 from temp_vc_bot.services.topics import Topic
 from temp_vc_bot.state import TimerPhase
@@ -22,6 +23,7 @@ from .fake_discord import (
     EPHEMERAL_FLAG,
     GUILD_ID,
     HUB_ID,
+    MANAGE_CHANNELS,
     SEND_MESSAGES,
     TEXT_INPUT,
     TOPIC_CHANNEL_ID,
@@ -153,6 +155,7 @@ class TestAdvertise:
         assert card["embeds"][0]["title"] == f"💬 {NAME}"
         assert labels(card) == ["I'm interested", "Create a VC"]
         assert interested_count(card) == "Interested (0)"
+        assert card["embeds"][0]["color"] == discord.Colour.red().value
 
     async def test_private_card_points_to_the_posted_one(self, world: FakeDiscord, bot: TempVCBot) -> None:
         host = world.add_member("Alice")
@@ -405,6 +408,41 @@ class TestTopicSetup:
             await start_bot()
         # Discord also takes away Embed Links from anyone who can't send messages.
         assert "The bot is missing these permissions in the topic channel: Send Messages, Embed Links." in caplog.text
+
+
+class TestChannelTopic:
+    async def test_the_channels_topic_explains_topic(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        topic = world.channels[TOPIC_CHANNEL_ID]["topic"]
+        assert topic == TOPIC_CHANNEL_DESCRIPTION
+        assert "Type **/topic** to start a topic" in topic
+        assert topic.endswith("Please don't write anything else in this channel.")
+
+    async def test_nothing_is_posted_in_the_chat_for_everyone(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        assert world.messages_in(TOPIC_CHANNEL_ID) == []
+
+    async def test_a_topic_that_is_already_right_is_not_written_again(self, world: FakeDiscord, start_bot: BotStarter) -> None:
+        world.channels[TOPIC_CHANNEL_ID]["topic"] = TOPIC_CHANNEL_DESCRIPTION
+        await start_bot()
+        await world.force_new_gateway_session()
+        assert world.request_count("PATCH", f"/channels/{TOPIC_CHANNEL_ID}") == 0
+
+    async def test_a_different_topic_is_replaced(self, world: FakeDiscord, start_bot: BotStarter) -> None:
+        world.channels[TOPIC_CHANNEL_ID]["topic"] = "Old description"
+        await start_bot()
+        assert world.channels[TOPIC_CHANNEL_ID]["topic"] == TOPIC_CHANNEL_DESCRIPTION
+
+    async def test_a_bot_that_cant_edit_the_channel_says_so(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
+        world.channels[TOPIC_CHANNEL_ID]["permission_overwrites"] = [
+            {"id": str(BOT_ROLE_ID), "type": 0, "allow": "0", "deny": str(MANAGE_CHANNELS)}
+        ]
+        with caplog.at_level(logging.WARNING):
+            await start_bot()
+        assert "The bot is missing these permissions in the topic channel: Manage Channels." in caplog.text
+        assert "Could not set the topic channel's topic" in caplog.text
+        assert world.channels[TOPIC_CHANNEL_ID]["topic"] is None
+
+    def test_the_text_fits_discords_limit(self) -> None:
+        assert len(TOPIC_CHANNEL_DESCRIPTION) <= 1024
 
 
 class TestTopicUnits:

@@ -15,6 +15,7 @@ import discord
 from ..constants import (
     ALREADY_OWN_VC_MESSAGE,
     INVITES_PER_MESSAGE,
+    TOPIC_CHANNEL_DESCRIPTION,
     TOPIC_HAS_VC_MESSAGE,
     TOPIC_INVITE_MESSAGE,
     TOPIC_JOIN_DEADLINE_MINUTES,
@@ -70,6 +71,22 @@ class TopicService:
     def __init__(self, channels: ChannelManager, setup: SessionSetup) -> None:
         self.channels = channels
         self.setup = setup
+
+    async def describe_channel(self) -> None:
+        """Put the guide to /topic in the topic channel's topic, the line at the top of the channel.
+
+        Nothing is written if it's already there, so this is safe on every start and
+        doesn't use up one of the few channel edits Discord allows every 10 minutes.
+        """
+        channel = self.channels.topic_channel
+        if channel is None or channel.topic == TOPIC_CHANNEL_DESCRIPTION:
+            return  # The startup check reports a missing channel.
+        try:
+            await channel.edit(topic=TOPIC_CHANNEL_DESCRIPTION, reason="Explain /topic")
+        except API_ERRORS as error:
+            log.warning("Could not set the topic channel's topic: %s", error)
+            return
+        log.info("Set the topic of channel %s to the guide to /topic.", channel.id)
 
     async def open_vc(self, topic: Topic, host: discord.Member) -> TempVCSession:
         """Create the topic's VC, move the host in if they're in voice, and invite everyone interested.
