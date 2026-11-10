@@ -39,6 +39,12 @@ REQUIRED_HUB_PERMISSIONS = {
     "view_channel": "View Channels",
     "move_members": "Move Members",
 }
+# What the bot needs in the topic channel, to post topic cards and invites.
+REQUIRED_TOPIC_CHANNEL_PERMISSIONS = {
+    "view_channel": "View Channels",
+    "send_messages": "Send Messages",
+    "embed_links": "Embed Links",
+}
 
 
 def human_members(channel: discord.VoiceChannel) -> list[discord.Member]:
@@ -134,6 +140,10 @@ class ChannelManager:
         self.bot = bot
         self.settings = settings
         self.sessions = sessions
+        # Held while checking whether someone already owns a channel and creating one
+        # for them. Otherwise a double click on the hub, or the hub and /topic at the
+        # same moment, could give one person two channels, because creating takes a moment.
+        self.creation_lock = asyncio.Lock()
 
     # ----- Looking things up ------------------------------------------------
 
@@ -148,6 +158,13 @@ class ChannelManager:
         channel = guild.get_channel(session.channel_id) if guild else None
         return channel if isinstance(channel, discord.VoiceChannel) else None
 
+    @property
+    def topic_channel(self) -> discord.TextChannel | None:
+        """The text channel where /topic works and topic cards are posted."""
+        guild = self.guild
+        channel = guild.get_channel(self.settings.topic_channel_id) if guild else None
+        return channel if isinstance(channel, discord.TextChannel) else None
+
     def require_channel(self, session: TempVCSession) -> discord.VoiceChannel:
         """Find a session's voice channel, or raise an error if it is gone."""
         channel = self.get_channel(session)
@@ -157,13 +174,16 @@ class ChannelManager:
 
     # ----- Creating ---------------------------------------------------------
 
-    async def create_session(self, owner: discord.Member) -> TempVCSession:
-        """Create a temp VC for `owner` and start tracking it."""
+    async def create_session(self, owner: discord.Member, *, name: str | None = None) -> TempVCSession:
+        """Create a temp VC for `owner` and start tracking it.
+
+        Without a `name`, the channel is named after the owner until they rename it.
+        """
         category = owner.guild.get_channel(self.settings.temp_vc_category_id)
         if not isinstance(category, discord.CategoryChannel):
             raise CategoryMissingError(f"No category with ID {self.settings.temp_vc_category_id}.")
 
-        name = CHANNEL_NAME_TEMPLATE.format(name=owner.display_name)[:MAX_CHANNEL_NAME_LENGTH]
+        name = (name or CHANNEL_NAME_TEMPLATE.format(name=owner.display_name))[:MAX_CHANNEL_NAME_LENGTH]
         # Passing no overwrites here makes the channel copy its category's permissions,
         # so a private category stays private. The bot's and owner's are added after.
         channel = await owner.guild.create_voice_channel(name, category=category, reason="Temp VC created")
@@ -442,6 +462,13 @@ class ChannelManager:
             _log_missing_permissions("the category", category.permissions_for(guild.me), REQUIRED_CATEGORY_PERMISSIONS)
         else:
             log.error("TEMP_VC_CATEGORY_ID %s is not a category in this server.", self.settings.temp_vc_category_id)
+
+        topic_channel = self.topic_channel
+        if topic_channel is not None:
+            permissions = topic_channel.permissions_for(guild.me)
+            _log_missing_permissions("the topic channel", permissions, REQUIRED_TOPIC_CHANNEL_PERMISSIONS)
+        else:
+            log.error("TOPIC_CHANNEL_ID %s is not a text channel in this server.", self.settings.topic_channel_id)
 
 
 def _log_missing_permissions(place: str, permissions: discord.Permissions, required: dict[str, str]) -> None:

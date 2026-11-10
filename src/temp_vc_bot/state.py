@@ -66,6 +66,10 @@ class TempVCSession:
     # Deletes the channel if it isn't named in time.
     naming_task: asyncio.Task[None] | None = None
     name_prompt: NamePromptView | None = None
+    # For a channel made from /topic, whose host may not be in voice: deletes the
+    # channel if nobody joins it in time. A channel made from the hub never needs it,
+    # because its owner is moved in.
+    join_task: asyncio.Task[None] | None = None
     # The status the owner last set through the bot, used to fill in the rename form.
     # Discord doesn't include a channel's status with the channel, so it's kept here.
     status: str | None = None
@@ -73,6 +77,11 @@ class TempVCSession:
     # replaced. crowned_nick is None while the owner has no crown from the bot.
     crowned_nick: str | None = None
     original_nick: str | None = None
+
+    @property
+    def waiting_for_first_join(self) -> bool:
+        """Whether the channel may still be empty because it's new, not because everyone left."""
+        return self.join_task is not None and not self.join_task.done()
 
     @property
     def timer_started(self) -> bool:
@@ -101,8 +110,8 @@ class TempVCSession:
         self.ends_at += minutes_to_delta(EXTENSION_MINUTES)
 
     def stop_background_work(self) -> None:
-        """Cancel the timer, its reposts and the naming deadline, and stop listening for clicks."""
-        for task in (self.timer_task, self.repost_task, self.naming_task):
+        """Cancel the timer, its reposts and both deadlines, and stop listening for clicks."""
+        for task in (self.timer_task, self.repost_task, self.naming_task, self.join_task):
             # A task must not cancel itself, or it would stop before deleting the channel.
             if task is not None and task is not asyncio.current_task():
                 task.cancel()

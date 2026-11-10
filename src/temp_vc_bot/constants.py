@@ -134,3 +134,57 @@ INVALID_LIMIT_MESSAGE = (
 RENAME_LIMIT_MESSAGE = (
     "Discord only allows about 2 renames per 10 minutes for each channel. Please try again in {wait}."
 )
+
+# ---------------------------------------------------------------------------
+# /topic, in the topic channel (TOPIC_CHANNEL_ID in .env)
+# ---------------------------------------------------------------------------
+TOPIC_COMMAND_DESCRIPTION = "Suggest something to talk about, see who's interested, then open a VC for it."
+# An advertised topic closes after this many minutes with no clicks on its card.
+TOPIC_IDLE_MINUTES = 60
+# A topic's VC is deleted if nobody joins it within this many minutes. Its host
+# may not be in voice when they create it, so nobody can be moved in.
+TOPIC_JOIN_DEADLINE_MINUTES = 5
+# How long the private card's buttons keep working after the last click, in seconds.
+# The bot edits that card through the last click, and Discord only allows that for
+# 15 minutes, so this stays a minute below MODAL_TIMEOUT_SECONDS.
+TOPIC_DRAFT_SECONDS = 14 * 60
+MAX_TOPIC_LENGTH = 1000
+# The card names this many interested people, then says how many more there are.
+MAX_INTERESTED_SHOWN = 30
+# People pinged per invite message. Discord allows 100 per message, and this many
+# mentions stay well inside its 2,000-character limit.
+INVITES_PER_MESSAGE = 50
+
+TOPIC_FORM_TITLE = "Start a topic"
+TOPIC_NAME_LABEL = "Channel name"
+TOPIC_NAME_PLACEHOLDER = "e.g. Exam revision"
+TOPIC_TEXT_LABEL = "What do you want to discuss?"
+TOPIC_TEXT_PLACEHOLDER = "A sentence or two, so people know what they're joining"
+EDIT_TOPIC_LABEL = "Edit"
+ADVERTISE_LABEL = "Advertise"
+CREATE_VC_LABEL = "Create a VC"
+INTERESTED_LABEL = "I'm interested"
+
+WRONG_TOPIC_CHANNEL_MESSAGE = "/topic only works in {channel}."
+EMPTY_TOPIC_MESSAGE = "Please fill in all three boxes. Spaces on their own don't count."
+TOPIC_PREVIEW_MESSAGE = (
+    "Only you can see this card. **Advertise** posts it in the chat, so people can say they're interested. "
+    "**Create a VC** opens a voice channel for it now."
+)
+TOPIC_ADVERTISED_MESSAGE = (
+    "📣 Your topic is posted in {channel}. When you're ready, click **Create a VC** on it, "
+    "and everyone who's interested will be invited."
+)
+TOPIC_FOOTER_OPEN = "Click I'm interested to be invited when the VC opens. Click it again to take it back."
+TOPIC_FOOTER_VC_OPEN = "The VC is open. Click the channel above to join."
+TOPIC_FOOTER_CLOSED = "This topic has closed. Use /topic to start a new one."
+NOT_HOST_MESSAGE = "Only the person who started this topic can do this."
+HOST_INTERESTED_MESSAGE = "You started this topic, so you're already in."
+TOPIC_HAS_VC_MESSAGE = "This topic already has a VC: {channel}"
+TOPIC_VC_BEING_CREATED_MESSAGE = "The VC for this topic is already being created."
+ALREADY_OWN_VC_MESSAGE = "You already have a temporary VC: {channel}. End it before creating another one."
+TOPIC_VC_READY_MESSAGE = "✅ Your VC is ready: {channel}"
+TOPIC_VC_JOIN_SOON_MESSAGE = " If nobody joins within {minutes} minutes, it will be deleted."
+TOPIC_INVITE_MESSAGE = "{mentions} **{name}** is open, and you said you're interested. Join here: {channel}"
+TOPIC_DRAFT_EXPIRED_MESSAGE = "This draft has expired. Use /topic to start again."
+TOPIC_CHANNEL_MISSING_MESSAGE = "I can't find the channel for topics. Please tell a server admin."

@@ -13,7 +13,7 @@ from temp_vc_bot import countdown_ring
 from temp_vc_bot.bot import TempVCBot
 from temp_vc_bot.config import Settings
 
-from .fake_discord import CATEGORY_ID, GUILD_ID, HUB_ID, TOKEN, FakeDiscord, FakeVoiceClient
+from .fake_discord import CATEGORY_ID, GUILD_ID, HUB_ID, TOKEN, TOPIC_CHANNEL_ID, FakeDiscord, FakeVoiceClient
 
 BotStarter = Callable[..., Awaitable[TempVCBot]]
 
@@ -47,7 +47,7 @@ async def start_bot(world: FakeDiscord) -> AsyncIterator[BotStarter]:
     running: list[tuple[TempVCBot, asyncio.Task[None]]] = []
 
     async def start(*, guild_id: int = GUILD_ID) -> TempVCBot:
-        bot = TempVCBot(Settings(TOKEN, guild_id, HUB_ID, CATEGORY_ID))
+        bot = TempVCBot(Settings(TOKEN, guild_id, HUB_ID, CATEGORY_ID, TOPIC_CHANNEL_ID))
         bot._connection.guild_ready_timeout = 0.01  # Don't wait 2 seconds on every test.
         await bot.login(TOKEN)
         task = asyncio.create_task(bot.connect())

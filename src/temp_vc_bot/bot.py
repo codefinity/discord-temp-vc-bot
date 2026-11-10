@@ -1,15 +1,22 @@
 """Create the bot and connect its parts together."""
 
+import logging
+
 import discord
 from discord.ext import commands
 
 from . import ratelimit_fix
 from .config import Settings
 from .constants import MAX_RATE_LIMIT_WAIT_SECONDS
+from .errors import API_ERRORS
 from .services.channel_manager import ChannelManager
 from .services.naming import NamingService
+from .services.session_setup import SessionSetup
 from .services.timer import TimerService
+from .services.topics import TopicService
 from .state import SessionRegistry
+
+log = logging.getLogger(__name__)
 
 
 def build_intents() -> discord.Intents:
@@ -30,8 +37,8 @@ class TempVCBot(commands.Bot):
         # Without this, max_ratelimit_timeout below allows only one new channel per day.
         ratelimit_fix.apply()
         super().__init__(
-            # The bot has no text commands. discord.py requires a prefix anyway, and
-            # this choice needs no message access.
+            # The bot has no text commands, only the /topic slash command. discord.py
+            # requires a prefix anyway, and this choice needs no message access.
             command_prefix=commands.when_mentioned,
             help_command=None,
             intents=build_intents(),
@@ -49,10 +56,31 @@ class TempVCBot(commands.Bot):
         self.channel_manager = ChannelManager(self, settings, self.sessions)
         self.timer_service = TimerService(self.channel_manager)
         self.naming_service = NamingService(self.channel_manager)
+        self.session_setup = SessionSetup(self.channel_manager, self.timer_service, self.naming_service)
+        self.topic_service = TopicService(self.channel_manager, self.session_setup)
 
     async def setup_hook(self) -> None:
-        """Runs once before the bot connects. Loads the event handlers."""
+        """Runs once before the bot connects. Loads the event handlers and /topic."""
         await self.load_extension("temp_vc_bot.cogs.voice_events")
+        await self.load_extension("temp_vc_bot.cogs.topics")
+        await self._register_commands()
+
+    async def _register_commands(self) -> None:
+        """Send Discord the current list of slash commands, so /topic appears in the server.
+
+        Sending the same list again changes nothing, so this is safe on every start.
+        """
+        try:
+            commands_sent = await self.tree.sync(guild=discord.Object(self.settings.guild_id))
+        except API_ERRORS as error:
+            # The bot still runs. Only /topic is missing until this works.
+            log.error(
+                "Could not register /topic with Discord: %s. Open the invite link in DEPLOYMENT.md "
+                "again so the bot can add commands, and check GUILD_ID.",
+                error,
+            )
+            return
+        log.info("Registered %s in the server.", ", ".join(f"/{command.name}" for command in commands_sent))
 
     async def on_message(self, message: discord.Message, /) -> None:
         """Skip discord.py's search for a text command in every message.

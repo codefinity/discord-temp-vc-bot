@@ -4,6 +4,8 @@ A Discord bot that gives each member their own voice channel on a timer.
 
 A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to give the channel a name and a status: if they don't within 2 minutes, the channel is deleted. While they own it, the owner has a 👑 in front of their name. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
 
+Members can also find a group first. In the topic channel, such as **#find-your-group**, **/topic** asks for a channel name, a status and what they want to discuss, and shows them a card only they can see. **Advertise** posts the card for everyone, and others click **I'm interested**. When the member clicks **Create a VC**, the bot creates the channel and pings everyone who's interested with a link to join it.
+
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
 
@@ -28,25 +30,32 @@ temp-vc-bot/
 │   ├── countdown_ring.py       Draws the circular countdown image (added)
 │   ├── ratelimit_fix.py        Fixes a discord.py rate-limit bug (added)
 │   ├── cogs/
-│   │   └── voice_events.py     Hub joins, people joining and leaving, startup
+│   │   ├── voice_events.py     Hub joins, people joining and leaving, startup
+│   │   └── topics.py           The /topic command (added)
 │   ├── services/
 │   │   ├── channel_manager.py  Create, delete, rename, status, lock, limit, owner's crown
+│   │   ├── session_setup.py    Posts a new channel's messages, from the hub or /topic (added)
 │   │   ├── naming.py           Deletes a channel that isn't named in time (added)
-│   │   └── timer.py            Countdown, extension, auto-close
+│   │   ├── timer.py            Countdown, extension, auto-close
+│   │   └── topics.py           A topic's interested list, its VC and the invites (added)
 │   └── views/
 │       ├── owner_only.py       Shared owner-only check (added)
 │       ├── name_prompt.py      "Name your channel" button (added)
 │       ├── control_panel.py    Rename, limit, lock, timer and end controls
 │       ├── modals.py           Name-and-status and user limit forms
 │       ├── extend_prompt.py    Yes and No extension buttons
-│       └── end_confirm.py      "End now?" question before ending early (added)
+│       ├── end_confirm.py      "End now?" question before ending early (added)
+│       ├── topic_card.py       What a topic card shows (added)
+│       ├── topic_draft.py      The /topic form and the private card (added)
+│       └── topic_ad.py         The public card with I'm interested (added)
 └── tests/                      Automated tests (added)
     ├── fake_discord.py         A stand-in for Discord's servers
     ├── test_end_to_end.py      The real bot against the stand-in
+    ├── test_topics.py          /topic against the stand-in
     └── test_units.py           Small pieces on their own
 ```
 
-**Seven additions to the suggested layout:**
+**Eight additions to the suggested layout:**
 
 - `errors.py`: the buttons, forms and event handlers all need the same friendly messages, so they live in one place.
 - `countdown_ring.py`: Discord embeds can't draw shapes, so the circular countdown is a picture. This file only draws it. `timer.py` decides what it shows and when.
@@ -54,6 +63,7 @@ temp-vc-bot/
 - `ratelimit_fix.py`: works around a discord.py bug that allowed only one new channel per day. See "Discord behaviour the code handles" below.
 - `services/naming.py` and `views/name_prompt.py`: making the owner name each channel wasn't in the brief. The prompt and its button live in the view, and the 2-minute deadline lives in the service, next to the timer.
 - `views/end_confirm.py`: the End discussion button wasn't in the brief. Ending a channel early can't be undone, so the button asks the owner to confirm first, and that question lives here.
+- `/topic` wasn't in the brief either. The command is in `cogs/topics.py`, the work behind it in `services/topics.py`, and its cards in the three `views/topic_*.py` files. A topic's VC is set up the same way as one from the hub, so that step moved from `voice_events.py` into `services/session_setup.py`, which both use.
 - `tests/`: lets you check a change without a live server. The bot doesn't need these files to run.
 
 ## Where the brief and Discord disagree
@@ -153,6 +163,21 @@ The brief left these open. Each one is easy to change.
 - The hub can be inside or outside the category.
 - Startup cleanup deletes only channels that carry the bot's own Manage Channels overwrite. The hub and any permanent channels in the category are left alone. If you ever add a member-level overwrite for the bot to the category itself, synced channels would look like leftovers, so use a role instead.
 - Errors that happen before a temp VC exists are posted in the hub's text chat for 30 seconds, tagging the member.
+
+**/topic**
+
+- `/topic` only works in the channel in `TOPIC_CHANNEL_ID`. Anywhere else, it privately says where to use it. Discord shows the command in every channel, and only server admins can hide it, under **Server Settings**, then **Integrations**.
+- The command is registered only to the server in `GUILD_ID`, the one server the bot serves, each time the bot starts. If registering fails, the bot still runs without `/topic`, and the log says so.
+- The name, status and topic are asked for in a form, because a card can't hold text boxes. All three are required. A name has 1 to 100 characters, a status up to 500 and a topic up to 1,000.
+- The card from the form is private. Its **Edit** button reopens the form, filled in. Discord only lets the bot change a private card for 15 minutes after the last click, so the card expires after 14 minutes without one (`TOPIC_DRAFT_SECONDS`).
+- **Create a VC** is on both cards, so a member can open a VC without advertising first. On the public card only the person who started the topic can use it. Anyone else who clicks gets a private note.
+- **I'm interested** adds the clicker to the card's list, in the order people clicked. Clicking again takes them off. The person who started the topic is already in, so their click just gets a private note. The card lists 30 people by name (`MAX_INTERESTED_SHOWN`), then says how many more.
+- A public card closes after 60 minutes with no clicks (`TOPIC_IDLE_MINUTES`). Its buttons are removed and it says so.
+- "Invited" means a message in the topic channel that pings everyone interested and links to the VC. Clicking the link joins it. Discord can't move someone into a channel unless they're already in voice, and many members turn off direct messages from servers, so the bot doesn't send those. Each message pings at most 50 people (`INVITES_PER_MESSAGE`), so a big crowd gets more than one message.
+- The VC is an ordinary temp VC with the topic's name and status: same category and permissions, control panel, timer, crown and cleanup. It skips the naming prompt, because it already has a name. Anyone can join, not only the people who were interested.
+- If the member who clicks **Create a VC** is in a voice channel, they're moved into the new VC. If not, it waits for them or anyone else. If nobody joins within 5 minutes (`TOPIC_JOIN_DEADLINE_MINUTES`), it's deleted, because no "leave" event would ever clean it up. The member is told this when the VC is created.
+- One person can own one temp VC at a time, from the hub or `/topic`. **Create a VC** tells someone who already owns one to end it first.
+- Topics live in memory, like sessions. After a restart, buttons on cards posted before it stop working, and members start a new topic.
 
 **Restarts**
 

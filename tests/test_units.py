@@ -251,24 +251,29 @@ class TestFriendlyMessages:
         assert "about 2 minutes" in friendly_error(discord.RateLimited(90))
 
 
+SETTING_NAMES = ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID", "TOPIC_CHANNEL_ID")
+
+
 class TestConfig:
     @staticmethod
     def _write_env(tmp_path, monkeypatch, text: str, encoding: str = "utf-8") -> None:
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             monkeypatch.delenv(name, raising=False)
         (tmp_path / ".env").write_text(text, encoding=encoding)
         monkeypatch.chdir(tmp_path)
         # load_dotenv fills os.environ. Have pytest undo that after each test.
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             monkeypatch.setenv(name, "")
             monkeypatch.delenv(name)
 
-    VALID = "DISCORD_TOKEN=abc\nGUILD_ID=1\nHUB_CHANNEL_ID=2\nTEMP_VC_CATEGORY_ID=3\n"
+    VALID = "DISCORD_TOKEN=abc\nGUILD_ID=1\nHUB_CHANNEL_ID=2\nTEMP_VC_CATEGORY_ID=3\nTOPIC_CHANNEL_ID=4\n"
 
     def test_valid_file(self, tmp_path, monkeypatch) -> None:
         self._write_env(tmp_path, monkeypatch, self.VALID)
         settings = load_settings()
-        assert (settings.discord_token, settings.guild_id, settings.hub_channel_id, settings.temp_vc_category_id) == ("abc", 1, 2, 3)
+        values = (settings.discord_token, settings.guild_id, settings.hub_channel_id, settings.temp_vc_category_id)
+        assert values == ("abc", 1, 2, 3)
+        assert settings.topic_channel_id == 4
 
     def test_token_never_appears_when_settings_are_printed(self, tmp_path, monkeypatch) -> None:
         self._write_env(tmp_path, monkeypatch, self.VALID)
@@ -283,7 +288,7 @@ class TestConfig:
         with pytest.raises(ConfigError) as caught:
             load_settings()
         message = str(caught.value)
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             assert name in message
 
     def test_unedited_example_file_is_rejected(self, tmp_path, monkeypatch) -> None:
@@ -293,11 +298,11 @@ class TestConfig:
         with pytest.raises(ConfigError) as caught:
             load_settings()
         message = str(caught.value)
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             assert name in message
 
     def test_missing_file_says_how_to_create_it(self, tmp_path, monkeypatch) -> None:
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             monkeypatch.delenv(name, raising=False)
         monkeypatch.chdir(tmp_path)
         with pytest.raises(ConfigError, match=r"Copy \.env\.example"):
@@ -306,7 +311,7 @@ class TestConfig:
 
 class TestMain:
     def test_bad_settings_exit_with_the_code_systemd_wont_restart(self, tmp_path, monkeypatch) -> None:
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             monkeypatch.delenv(name, raising=False)
         monkeypatch.chdir(tmp_path)
         with pytest.raises(SystemExit) as caught:
@@ -316,7 +321,7 @@ class TestMain:
     def test_rejected_token_exits_with_the_same_code(self, tmp_path, monkeypatch) -> None:
         (tmp_path / ".env").write_text(TestConfig.VALID, encoding="utf-8")
         monkeypatch.chdir(tmp_path)
-        for name in ("DISCORD_TOKEN", "GUILD_ID", "HUB_CHANNEL_ID", "TEMP_VC_CATEGORY_ID"):
+        for name in SETTING_NAMES:
             monkeypatch.setenv(name, "")
             monkeypatch.delenv(name)
 
