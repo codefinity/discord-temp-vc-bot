@@ -213,6 +213,7 @@ class VoiceEvents(commands.Cog):
                 return  # The owner left straight away, so there is nothing to report.
             log.error("Could not post the controls in channel %s: %s", channel.id, error)
             await self.channels.notify_in_hub(owner.id, friendly_error(error))
+        await self.channels.crown_owner(session, owner)
         session.setup_finished = True
 
         # Someone may have joined while those messages were being sent.

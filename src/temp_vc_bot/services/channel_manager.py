@@ -13,8 +13,10 @@ from ..constants import (
     DELETE_ATTEMPTS,
     HUB_NOTICE_SECONDS,
     MAX_CHANNEL_NAME_LENGTH,
+    MAX_NICKNAME_LENGTH,
     MAX_USER_LIMIT,
     NO_USER_LIMIT,
+    OWNER_CROWN,
 )
 from ..errors import API_ERRORS, CategoryMissingError, ChannelGoneError
 from ..state import SessionRegistry, TempVCSession
@@ -58,6 +60,45 @@ def seats_needed(requested_limit: int, bots_in_channel: int) -> int:
     if requested_limit == NO_USER_LIMIT:
         return NO_USER_LIMIT
     return min(requested_limit + bots_in_channel, MAX_USER_LIMIT)
+
+
+def crowned_nickname(display_name: str) -> str:
+    """The owner's nickname with the crown in front, cut to fit Discord's limit.
+
+    Discord may count an emoji such as the crown as two characters, the way
+    JavaScript does, so the length is measured that way to be safe.
+    """
+    nickname = OWNER_CROWN + display_name
+    while len(nickname.encode("utf-16-le")) // 2 > MAX_NICKNAME_LENGTH:
+        nickname = nickname[:-1]
+    return nickname
+
+
+def _why_no_crown(member: discord.Member) -> str | None:
+    """Why Discord won't let the bot change this member's nickname, or None if it will."""
+    guild = member.guild
+    me = guild.me
+    if not me.guild_permissions.manage_nicknames:
+        return "the bot is missing Manage Nicknames"
+    if member.id == guild.owner_id:
+        return "they own the server, and Discord never lets bots change the owner's nickname"
+    if member.top_role >= me.top_role:
+        return f"their highest role, {member.top_role.name}, isn't below the bot's role"
+    return None
+
+
+def _member_overwrite_ids(channel: discord.VoiceChannel) -> list[int]:
+    """The members, other than the bot, with their own overwrite on a channel.
+
+    On a temp VC that's the owner, who gets one so they can always get in.
+    """
+    me_id = channel.guild.me.id
+    ids = []
+    for target in channel.overwrites:
+        is_role = isinstance(target, discord.Role) or (isinstance(target, discord.Object) and target.type is discord.Role)
+        if not is_role and target.id != me_id:
+            ids.append(target.id)
+    return ids
 
 
 def _bot_overwrite(me: discord.Member) -> discord.PermissionOverwrite:
@@ -245,6 +286,9 @@ class ChannelManager:
         session.closed = True
         log.info("Closing temp VC %s: %s.", session.channel_id, reason)
         session.stop_background_work()
+        # Before the delete: if the bot stopped in between, the startup cleanup finds
+        # the owner through the leftover channel and takes the crown off then.
+        await self.remove_crown(session)
         channel = self.get_channel(session)
         if channel is not None:
             await self._delete_channel(channel)
@@ -265,6 +309,69 @@ class ChannelManager:
                 return
         log.error("Gave up deleting channel %s after %d attempts.", channel.id, DELETE_ATTEMPTS)
 
+    # ----- The owner's crown ------------------------------------------------
+
+    async def crown_owner(self, session: TempVCSession, owner: discord.Member) -> None:
+        """Put a crown in front of the owner's nickname while they own the channel.
+
+        Owners Discord won't let the bot rename, such as the server owner, just
+        don't get one. The channel works the same either way.
+        """
+        if session.closed:
+            return
+        reason = _why_no_crown(owner)
+        if reason is not None:
+            log.info("No crown for member %s: %s.", owner.id, reason)
+            return
+        try:
+            # Fetched fresh: discord.py keeps its copy of a member while they're in
+            # voice, and without the Members intent the bot hears nothing when their
+            # nickname changes. Crowning an out-of-date nickname would undo their
+            # change when the channel closes and that one is given back.
+            member = await owner.guild.fetch_member(owner.id)
+            if member.display_name.startswith(OWNER_CROWN):
+                return
+            original, crowned = member.nick, crowned_nickname(member.display_name)
+            await member.edit(nick=crowned, reason="Temp VC owner")
+        except API_ERRORS as error:
+            log.warning("Could not give member %s the owner's crown: %s", owner.id, error)
+            return
+        session.original_nick, session.crowned_nick = original, crowned
+        if session.closed:
+            # The channel closed during the edit, when there was no crown yet to remove.
+            await self.remove_crown(session)
+
+    async def remove_crown(self, session: TempVCSession) -> None:
+        """Give the owner back their old nickname, unless they've changed it since."""
+        crowned, session.crowned_nick = session.crowned_nick, None
+        guild = self.guild
+        if crowned is None or guild is None:
+            return
+        try:
+            # Fetched fresh: without the Members intent, the bot hears nothing when a
+            # nickname changes, so the copy it keeps can be out of date.
+            member = await guild.fetch_member(session.owner_id)
+            if member.nick == crowned:
+                await member.edit(nick=session.original_nick, reason="Temp VC closed")
+        except API_ERRORS as error:
+            log.warning("Could not take the crown off member %s: %s", session.owner_id, error)
+
+    async def _remove_leftover_crown(self, guild: discord.Guild, member_id: int) -> None:
+        """Take the crown off an owner from before a restart.
+
+        Their old nickname was lost in the restart. If what's left after the crown
+        is just their account's name, they most likely had no nickname, so it's cleared.
+        """
+        try:
+            member = await guild.fetch_member(member_id)
+            if member.nick is None or not member.nick.startswith(OWNER_CROWN):
+                return
+            rest = member.nick.removeprefix(OWNER_CROWN)
+            nick = None if rest == (member.global_name or member.name) else rest
+            await member.edit(nick=nick, reason="Temp VC closed before a restart")
+        except API_ERRORS as error:
+            log.warning("Could not take the crown off member %s after a restart: %s", member_id, error)
+
     # ----- Startup ----------------------------------------------------------
 
     async def delete_leftovers(self) -> None:
@@ -276,6 +383,8 @@ class ChannelManager:
         for channel in category.voice_channels:
             if self._is_leftover(channel):
                 log.info("Deleting leftover temp VC %s from before a restart.", channel.id)
+                for member_id in _member_overwrite_ids(channel):
+                    await self._remove_leftover_crown(channel.guild, member_id)
                 await self._delete_channel(channel)
 
     def _is_leftover(self, channel: discord.VoiceChannel) -> bool:
@@ -295,6 +404,12 @@ class ChannelManager:
             guild_id = self.settings.guild_id
             log.error("The bot is not in the server with GUILD_ID %s. Check .env and the invite.", guild_id)
             return
+
+        if not guild.me.guild_permissions.manage_nicknames:
+            log.warning(
+                "The bot is missing Manage Nicknames, so channel owners won't get a crown. "
+                "Open the invite link again to add it."
+            )
 
         hub = guild.get_channel(self.settings.hub_channel_id)
         if isinstance(hub, discord.VoiceChannel):
