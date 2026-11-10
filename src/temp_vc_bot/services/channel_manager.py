@@ -161,16 +161,17 @@ class ChannelManager:
             return False
         return True
 
-    async def notify_in_hub(self, member: discord.Member, text: str) -> None:
-        """Post a short notice in the hub's text chat, for when there is no temp VC yet."""
-        hub = member.guild.get_channel(self.settings.hub_channel_id)
+    async def notify_in_hub(self, member_id: int, text: str) -> None:
+        """Post a short notice in the hub's text chat, for when the member has no temp VC."""
+        guild = self.guild
+        hub = guild.get_channel(self.settings.hub_channel_id) if guild else None
         if not isinstance(hub, discord.VoiceChannel):
             return
         try:
             await hub.send(
-                f"{member.mention} {text}",
+                f"<@{member_id}> {text}",
                 delete_after=HUB_NOTICE_SECONDS,
-                allowed_mentions=discord.AllowedMentions(users=[member]),
+                allowed_mentions=discord.AllowedMentions(users=[discord.Object(member_id)]),
             )
         except API_ERRORS as error:
             log.warning("Could not post a notice in the hub: %s", error)
@@ -183,6 +184,8 @@ class ChannelManager:
         channel = self.require_channel(session)
         if channel.name != new_name:  # Don't spend a rename on no change.
             await channel.edit(name=new_name, reason="Temp VC renamed by owner")
+        # Any name the owner chooses counts, even the one it already had.
+        session.named.set()
 
     async def set_user_limit(self, session: TempVCSession, requested_limit: int) -> int:
         """Set how many people may join. Returns how many actually fit."""

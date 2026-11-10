@@ -3,9 +3,11 @@
 import discord
 from discord.ext import commands
 
+from . import ratelimit_fix
 from .config import Settings
 from .constants import MAX_RATE_LIMIT_WAIT_SECONDS
 from .services.channel_manager import ChannelManager
+from .services.naming import NamingService
 from .services.timer import TimerService
 from .state import SessionRegistry
 
@@ -25,6 +27,8 @@ class TempVCBot(commands.Bot):
     """The bot itself, holding the shared session list and services."""
 
     def __init__(self, settings: Settings) -> None:
+        # Without this, max_ratelimit_timeout below allows only one new channel per day.
+        ratelimit_fix.apply()
         super().__init__(
             # The bot has no text commands. discord.py requires a prefix anyway, and
             # this choice needs no message access.
@@ -44,6 +48,7 @@ class TempVCBot(commands.Bot):
         self.sessions = SessionRegistry()
         self.channel_manager = ChannelManager(self, settings, self.sessions)
         self.timer_service = TimerService(self.channel_manager)
+        self.naming_service = NamingService(self.channel_manager)
 
     async def setup_hook(self) -> None:
         """Runs once before the bot connects. Loads the event handlers."""

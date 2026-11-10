@@ -2,7 +2,7 @@
 
 A Discord bot that gives each member their own voice channel on a timer.
 
-A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to name the channel: if they don't within 2 minutes, the channel is deleted. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
 
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
@@ -26,13 +26,16 @@ temp-vc-bot/
 │   ├── state.py                One channel's session, and the list of sessions
 │   ├── errors.py               Friendly error messages (added)
 │   ├── countdown_ring.py       Draws the circular countdown image (added)
+│   ├── ratelimit_fix.py        Fixes a discord.py rate-limit bug (added)
 │   ├── cogs/
 │   │   └── voice_events.py     Hub joins, people joining and leaving, startup
 │   ├── services/
 │   │   ├── channel_manager.py  Create, delete, rename, lock, limit
+│   │   ├── naming.py           Deletes a channel that isn't named in time (added)
 │   │   └── timer.py            Countdown, extension, auto-close
 │   └── views/
 │       ├── owner_only.py       Shared owner-only check (added)
+│       ├── name_prompt.py      "Name your channel" button (added)
 │       ├── control_panel.py    Rename, limit, lock, timer and end controls
 │       ├── modals.py           Rename and user limit forms
 │       ├── extend_prompt.py    Yes and No extension buttons
@@ -43,11 +46,13 @@ temp-vc-bot/
     └── test_units.py           Small pieces on their own
 ```
 
-**Five additions to the suggested layout:**
+**Seven additions to the suggested layout:**
 
 - `errors.py`: the buttons, forms and event handlers all need the same friendly messages, so they live in one place.
 - `countdown_ring.py`: Discord embeds can't draw shapes, so the circular countdown is a picture. This file only draws it. `timer.py` decides what it shows and when.
 - `views/owner_only.py`: the control panel and the extension prompt share one owner check. It has to be written a particular way (see the comment in that file), so one copy is safer than two.
+- `ratelimit_fix.py`: works around a discord.py bug that allowed only one new channel per day. See "Discord behaviour the code handles" below.
+- `services/naming.py` and `views/name_prompt.py`: making the owner name each channel wasn't in the brief. The prompt and its button live in the view, and the 2-minute deadline lives in the service, next to the timer.
 - `views/end_confirm.py`: the End discussion button wasn't in the brief. Ending a channel early can't be undone, so the button asks the owner to confirm first, and that question lives here.
 - `tests/`: lets you check a change without a live server. The bot doesn't need these files to run.
 
@@ -82,6 +87,7 @@ Discord lets some people past these, and a bot can't change that:
 These don't conflict with the brief, but the bot would fail without handling them:
 
 - **Renames could hang for 10 minutes.** By default, discord.py quietly sleeps through a rate limit, so a rename would appear to do nothing. The bot sets `max_ratelimit_timeout`, which makes the library raise an error instead, and the owner sees "try again in about 9 minutes". Discord doesn't document the rename limit, so the bot relies on Discord's own answer and doesn't count renames itself.
+- **That setting allowed only one new channel per day.** Discord counts new channels over 24 hours. With `max_ratelimit_timeout` set, discord.py refused every channel after the first until that window ended, even though Discord would have allowed more, and the log showed "Too many requests. Retry in 86251 seconds". [ratelimit_fix.py](src/temp_vc_bot/ratelimit_fix.py) lets requests through while Discord says some are left. When none are left, the member gets "try again later" in the hub straight away.
 - **Losing Connect removes other permissions.** [Denying Connect also denies Manage Channel](https://docs.discord.com/developers/topics/permissions). The bot's own Connect overwrite is what lets it still manage and delete a locked channel.
 - **A channel nobody entered gets no "leave" event.** If the owner leaves voice before the bot can move them in, the bot deletes the new channel at once. Otherwise it would stay forever.
 - **The bot can reconnect at any time.** Discord may fire `on_ready` more than once, and discord.py then replaces its cached objects. So startup cleanup runs only once, sessions store IDs instead of objects, and the bot catches up on anything it missed while disconnected.
@@ -102,6 +108,15 @@ The brief left these open. Each one is easy to change.
 - If the ring can't be drawn, the timer carries on with text only, and the error is logged.
 - The timer stays at the bottom of the chat. Discord can't keep a message on screen, and a pinned message only shows in the pins list. So when anything is posted below the timer, the bot waits 5 seconds (`TIMER_REPOST_DELAY_SECONDS`), posts the timer again at the bottom and deletes the old one. Everything posted during the wait is covered by one repost, so a busy chat doesn't flood the channel. This includes the bot's extension prompt, so the timer ends up just below it.
 - To hear about new messages, the bot asks for Discord's message events. It never reads what people write, so it doesn't need the privileged Message Content intent.
+
+**Naming**
+
+- A new channel starts as "Alice's VC". A message between the control panel and the timer tags the owner with a **Name your channel** button, which opens a form with an empty, required name box. If the channel isn't named within 2 minutes (`NAME_DEADLINE_MINUTES`), it's deleted, even with people in it, and the owner is tagged in the hub to say why.
+- Renaming from the control panel counts as naming too. So does choosing the name it already has, which doesn't use up a rename.
+- Naming is a rename, so it uses one of Discord's roughly 2 renames per 10 minutes. After naming, the owner can rename once more in that time.
+- A name Discord refuses doesn't count. The prompt stays, so the owner can try another.
+- The prompt shows the deadline as a fixed time, not a live countdown, for the same reason as the timer.
+- If the bot can't post the prompt, it doesn't delete the channel for being unnamed.
 
 **Ownership**
 

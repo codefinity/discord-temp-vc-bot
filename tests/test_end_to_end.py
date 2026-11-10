@@ -14,7 +14,7 @@ from PIL import Image
 
 from temp_vc_bot import constants, countdown_ring
 from temp_vc_bot.bot import TempVCBot
-from temp_vc_bot.services import timer
+from temp_vc_bot.services import naming, timer
 from temp_vc_bot.state import TimerPhase
 from temp_vc_bot.views import end_confirm, extend_prompt
 
@@ -136,6 +136,15 @@ class TestCreatingTheVC:
         _, second = await make_vc(world, "Bob")
         assert first != second
         assert len(world.temp_channels()) == 2
+
+    async def test_daily_channel_window_with_room_left_lets_everyone_in(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # Discord replies to a new channel with a 24-hour rate-limit window. discord.py
+        # used to refuse every later channel until that window ended, room left or not.
+        world.channel_creations_per_day = 50
+        for name in ("Alice", "Bob", "Carol"):
+            await make_vc(world, name)
+        assert len(world.temp_channels()) == 3
+        assert world.messages_in(HUB_ID) == []
 
     async def test_muting_while_in_the_hub_does_not_create_a_channel(self, world: FakeDiscord, bot: TempVCBot) -> None:
         # The member stays in the hub, because the move fails.
@@ -549,17 +558,25 @@ def fast_time(monkeypatch: pytest.MonkeyPatch) -> None:
     come every 0.2 seconds and race with the tests' clicks and edit counts.
     TestCountdownRing turns them back on where it needs them. For the same reason,
     the timer doesn't move below the extension prompt here. TestTimerStaysInView
-    checks that it does.
+    checks that it does. Unnamed channels aren't deleted here either, or they'd go
+    after 0.4 seconds. TestNamingDeadline checks that they are.
     """
     monkeypatch.setattr(constants, "SECONDS_PER_MINUTE", 0.2)
     monkeypatch.setattr(timer, "RING_REDRAW_MINUTES", 1000)
     monkeypatch.setattr(timer, "TIMER_REPOST_DELAY_SECONDS", 1000)
+    monkeypatch.setattr(naming, "NAME_DEADLINE_MINUTES", 1000)
 
 
 @pytest.fixture
 def time_to_answer(fast_time: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the answer window open for 4 seconds, so a click lands in time on a slow machine."""
     monkeypatch.setattr(extend_prompt, "ANSWER_WINDOW_MINUTES", 20)
+
+
+@pytest.fixture
+def naming_deadline(fast_time: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give owners 2 seconds to name a new channel: 10 "minutes" at the fast_time speed."""
+    monkeypatch.setattr(naming, "NAME_DEADLINE_MINUTES", 10)
 
 
 async def run_to_prompt(world: FakeDiscord, bot: TempVCBot) -> tuple[int, int, dict[str, Any]]:
@@ -1151,6 +1168,127 @@ class TestRaces:
         assert dropdown(world, channel_id)["disabled"] is True
 
 
+NAME_BUTTON = "Name your channel"
+PAST_THE_DEADLINE = 2.5  # Seconds. The naming_deadline fixture allows 2.
+
+
+def naming_prompt(world: FakeDiscord, channel_id: int) -> dict[str, Any] | None:
+    """The message asking the owner to name the channel, if it's still there."""
+    for message in world.messages_in(channel_id):
+        if any(button.get("label") == NAME_BUTTON for button in _buttons(message)):
+            return message
+    return None
+
+
+async def name_it(world: FakeDiscord, owner: int, channel_id: int, name: str) -> InteractionRecord:
+    """The owner clicks the naming button and submits `name`."""
+    prompt = naming_prompt(world, channel_id)
+    assert prompt is not None, "There is no naming prompt."
+    click = await world.click(owner, prompt, NAME_BUTTON)
+    return await world.submit_modal(owner, prompt, click.modal, name)
+
+
+class TestNamingDeadline:
+    async def test_new_channel_asks_the_owner_to_name_it(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        prompt = naming_prompt(world, channel_id)
+        assert prompt is not None
+        assert f"<@{owner}>" in prompt["content"]
+        assert "within 2 minutes" in prompt["content"]
+        assert [int(user) for user in prompt["allowed_mentions_sent"]["users"]] == [owner], "The owner must be pinged."
+
+    async def test_the_button_opens_an_empty_form_that_needs_a_name(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        click = await world.click(owner, naming_prompt(world, channel_id), NAME_BUTTON)
+        assert click.modal["title"] == "Name your channel"
+        text_box = find_component(click.modal, "type", 4)
+        assert text_box["required"] is True
+        assert text_box["min_length"] == 1
+        assert not text_box.get("value"), "The owner must type the name themselves."
+
+    async def test_naming_renames_the_channel_and_removes_the_prompt(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "Study group")
+        assert world.channels[channel_id]["name"] == "Study group"
+        assert "Study group" in result.private_texts()[0]
+        await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
+        assert world.voice[owner] == channel_id
+
+    async def test_only_the_owner_can_use_the_naming_button(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        friend = world.add_member("Bob")
+        await world.join_voice(friend, channel_id)
+        await world.settle()
+        click = await world.click(friend, naming_prompt(world, channel_id), NAME_BUTTON)
+        assert click.private_texts() == [NOT_OWNER]
+        assert not any(response["type"] == 9 for response in click.responses), "No form may open for them."
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_an_unnamed_channel_is_deleted_when_time_is_up(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        friend = world.add_member("Bob")
+        await world.join_voice(friend, channel_id)
+        await world.wait_for(lambda: channel_id not in world.channels)
+        await world.settle()
+        assert owner not in world.voice and friend not in world.voice
+        assert bot.sessions.by_owner(owner) is None
+        notice = next(m for m in world.messages_in(HUB_ID))
+        assert f"<@{owner}>" in notice["content"]
+        assert "wasn't named in time" in notice["content"]
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_a_named_channel_is_kept_after_the_deadline(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Study group")
+        await asyncio.sleep(PAST_THE_DEADLINE)
+        assert channel_id in world.channels
+        assert world.messages_in(HUB_ID) == []
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_renaming_from_the_control_panel_counts_as_naming(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        panel = world.panel_message(channel_id)
+        click = await world.click(owner, panel, "Rename")
+        await world.submit_modal(owner, panel, click.modal, "Study group")
+        await world.wait_for(lambda: naming_prompt(world, channel_id) is None)
+        await asyncio.sleep(PAST_THE_DEADLINE)
+        assert channel_id in world.channels
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_choosing_the_name_it_already_has_counts_without_spending_a_rename(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        await name_it(world, owner, channel_id, "Alice's VC")
+        await asyncio.sleep(PAST_THE_DEADLINE)
+        assert channel_id in world.channels
+        assert world.renames[channel_id] == []
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_a_name_discord_refuses_does_not_count(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        result = await name_it(world, owner, channel_id, "banned-word")
+        assert result.private_texts() == ["Discord rejected that name. Please try a different one."]
+        assert naming_prompt(world, channel_id) is not None, "The owner can still try another name."
+        await world.wait_for(lambda: channel_id not in world.channels)
+
+    @pytest.mark.usefixtures("naming_deadline")
+    async def test_a_channel_closed_early_cancels_the_deadline_quietly(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world)
+        task = bot.sessions.by_owner(owner).naming_task
+        await world.leave_voice(owner)
+        await world.wait_for(task.done)
+        assert task.cancelled()
+        await asyncio.sleep(PAST_THE_DEADLINE)
+        assert world.messages_in(HUB_ID) == [], "No 'wasn't named' notice for a channel that closed normally."
+
+    async def test_the_prompt_sits_between_the_panel_and_the_timer(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # The timer is still the last message, so it doesn't have to move below the prompt.
+        _, channel_id = await make_vc(world)
+        in_order = [m["id"] for m in sorted(world.messages_in(channel_id), key=lambda m: int(m["id"]))]
+        expected = [world.panel_message(channel_id), naming_prompt(world, channel_id), world.timer_message(channel_id)]
+        assert in_order == [message["id"] for message in expected]
+        assert world.request_count("DELETE", f"/channels/{channel_id}/messages") == 0
+
+
 class TestDiscordSizeLimits:
     """Discord refuses oversized labels and titles, which the fake doesn't enforce by itself."""
 
@@ -1206,6 +1344,20 @@ class TestErrors:
         world.bot_permissions = INVITE_PERMISSIONS & ~(1 << 24)  # Everything except Move Members.
         await start_bot()
         assert "Move Members" in caplog.text
+
+    async def test_using_up_the_daily_channels_tells_the_member_without_hanging(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        world.channel_creations_per_day = 2
+        await make_vc(world, "Alice")
+        await make_vc(world, "Bob")
+        carol = world.add_member("Carol")
+        started = time.monotonic()
+        await world.join_voice(carol, HUB_ID)
+        await world.settle()
+        assert time.monotonic() - started < 10, "A day-long limit must not hold up the hub."
+        assert len(world.temp_channels()) == 2
+        notice = next(m for m in world.messages_in(HUB_ID))
+        assert f"<@{carol}>" in notice["content"]
+        assert "try again" in notice["content"]
 
     async def test_startup_logs_missing_attach_files_which_the_ring_needs(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
         world.bot_permissions = INVITE_PERMISSIONS & ~ATTACH_FILES
