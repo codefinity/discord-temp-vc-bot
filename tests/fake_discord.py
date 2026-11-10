@@ -23,6 +23,8 @@ Discord's documentation:
 - Every new message is reported over the gateway, the bot's own included. The
   order of that report and the reply to the post isn't guaranteed, so the fake
   sends the report first, which is the harder case for the bot.
+- Slash commands are registered per server. A command interaction names the
+  server it was registered to, and has no message, unlike a button click.
 
 It does not handle voice audio. FakeVoiceClient stands in for that part, which is
 why a real voice connection can only be checked on a real server.
@@ -67,8 +69,12 @@ BOT_ROLE_ID = 1001
 BOT_USER_ID = 2000
 HUB_ID = 3000
 CATEGORY_ID = 3001
+TOPIC_CHANNEL_ID = 3002  # The text channel where /topic works, like #find-your-group.
 
 TEXT_INPUT = 4
+APPLICATION_COMMAND = 2
+COMPONENT = 3
+MODAL_SUBMIT = 5
 TOKEN = "fake-token"
 RENAMES_ALLOWED = 2
 RENAME_RETRY_AFTER_SECONDS = 540.0
@@ -148,6 +154,11 @@ class FakeDiscord:
         self.messages: dict[int, dict[str, Any]] = {}
         self.uploaded_files: dict[str, bytes] = {}  # Attachment ID -> the file's bytes.
         self.interactions: dict[str, InteractionRecord] = {}
+        # Server ID -> the slash commands the bot registered there, as Discord stores them.
+        self.commands: dict[int, list[dict[str, Any]]] = {}
+        # Tests can make registering commands fail, as it does for a bot invited
+        # without permission to add commands.
+        self.refuse_command_registration = False
         self.requests: list[tuple[str, str, dict[str, Any]]] = []
         self.identify: dict[str, Any] | None = None
         self.identify_count = 0
@@ -172,6 +183,7 @@ class FakeDiscord:
         self.members[BOT_USER_ID] = self._member_payload(BOT_USER_ID, "TempVC", bot=True, roles=[str(BOT_ROLE_ID)])
         self.add_channel("Create Your Own VC", channel_id=HUB_ID, channel_type=2)
         self.add_channel("Temp VCs", channel_id=CATEGORY_ID, channel_type=4)
+        self.add_channel("find-your-group", channel_id=TOPIC_CHANNEL_ID, channel_type=0)
 
     # ----- Building the world -----------------------------------------------
 
@@ -256,6 +268,8 @@ class FakeDiscord:
                 "last_message_id": None,
                 "rate_limit_per_user": 0,
             }
+        elif channel_type == 0:
+            payload |= {"topic": None, "last_message_id": None, "rate_limit_per_user": 0}
         return payload
 
     def _roles(self) -> list[dict[str, Any]]:
@@ -447,20 +461,33 @@ class FakeDiscord:
         """A person clicks the button with this label."""
         component = _find_all(message, "label", label)[0]
         data = {"custom_id": component["custom_id"], "component_type": 2}
-        return await self._interact(3, member_id, message, data)
+        return await self._interact(COMPONENT, member_id, message, data)
 
     async def choose(self, member_id: int, message: dict[str, Any], value: str) -> InteractionRecord:
         """A person picks an option in the message's dropdown."""
         select = _find_all(message, "type", 3)[0]
         data = {"custom_id": select["custom_id"], "component_type": 3, "values": [value]}
-        return await self._interact(3, member_id, message, data)
+        return await self._interact(COMPONENT, member_id, message, data)
+
+    async def use_command(self, member_id: int, channel_id: int, name: str) -> InteractionRecord:
+        """A person types a slash command, with no options, in a channel and sends it."""
+        command = next((c for c in self.commands.get(GUILD_ID, []) if c["name"] == name), None)
+        assert command is not None, f"/{name} isn't registered in the server."
+        data = {"id": command["id"], "name": name, "type": 1, "guild_id": str(GUILD_ID)}
+        return await self._interact(APPLICATION_COMMAND, member_id, None, data, channel_id=channel_id)
 
     async def submit_modal(
-        self, member_id: int, message: dict[str, Any], modal: dict[str, Any], *values: str
+        self,
+        member_id: int,
+        message: dict[str, Any] | None,
+        modal: dict[str, Any],
+        *values: str,
+        channel_id: int | None = None,
     ) -> InteractionRecord:
         """A person types `values` into a form's text boxes, in order, and submits it.
 
         Boxes not given a value keep what the form filled in, because Discord sends every box.
+        A form opened by a slash command has no `message`, so give its `channel_id` instead.
         """
         text_boxes = _find_all(modal, "type", TEXT_INPUT)
         assert len(values) <= len(text_boxes), "The form has fewer boxes than that."
@@ -470,7 +497,7 @@ class FakeDiscord:
             for box, value in zip(text_boxes, typed, strict=True)
         ]
         data = {"custom_id": modal["custom_id"], "components": rows}
-        return await self._interact(5, member_id, message, data)
+        return await self._interact(MODAL_SUBMIT, member_id, message, data, channel_id=channel_id)
 
     async def delete_channel_by_hand(self, channel_id: int, *, delete_event_first: bool) -> None:
         """A server admin deletes a channel in Discord's own interface.
@@ -494,35 +521,44 @@ class FakeDiscord:
         await self.settle()
 
     async def _interact(
-        self, interaction_type: int, member_id: int, message: dict[str, Any], data: dict[str, Any]
+        self,
+        interaction_type: int,
+        member_id: int,
+        message: dict[str, Any] | None,
+        data: dict[str, Any],
+        *,
+        channel_id: int | None = None,
     ) -> InteractionRecord:
+        """Send the bot an interaction, from a message's component or, with no message, from a channel."""
         interaction_id = self.next_id()
         token = f"interaction-token-{interaction_id}"
-        record = InteractionRecord(interaction_id, token, int(message["id"]), int(message["channel_id"]))
+        if message is not None:
+            channel_id = int(message["channel_id"])
+        assert channel_id is not None, "An interaction needs a message or a channel."
+        record = InteractionRecord(interaction_id, token, int(message["id"]) if message else None, channel_id)
         self.interactions[token] = record
-        channel = self.channels[int(message["channel_id"])]
-        await self._dispatch(
-            "INTERACTION_CREATE",
-            {
-                "id": str(interaction_id),
-                "application_id": str(BOT_USER_ID),
-                "type": interaction_type,
-                "token": token,
-                "version": 1,
-                "guild_id": str(GUILD_ID),
-                "channel_id": channel["id"],
-                "channel": channel,
-                "member": self.members[member_id],
-                "app_permissions": "0",
-                "locale": "en-US",
-                "attachment_size_limit": 26214400,
-                "entitlements": [],
-                "authorizing_integration_owners": {"0": str(GUILD_ID)},
-                "context": 0,
-                "data": data,
-                "message": message,
-            },
-        )
+        channel = self.channels[channel_id]
+        payload: dict[str, Any] = {
+            "id": str(interaction_id),
+            "application_id": str(BOT_USER_ID),
+            "type": interaction_type,
+            "token": token,
+            "version": 1,
+            "guild_id": str(GUILD_ID),
+            "channel_id": channel["id"],
+            "channel": channel,
+            "member": self.members[member_id],
+            "app_permissions": "0",
+            "locale": "en-US",
+            "attachment_size_limit": 26214400,
+            "entitlements": [],
+            "authorizing_integration_owners": {"0": str(GUILD_ID)},
+            "context": 0,
+            "data": data,
+        }
+        if message is not None:
+            payload["message"] = message
+        await self._dispatch("INTERACTION_CREATE", payload)
         await self.settle()
         return record
 
@@ -533,6 +569,7 @@ class FakeDiscord:
         routes = [
             ("GET", "/users/@me", self._get_me),
             ("GET", "/oauth2/applications/@me", self._get_application),
+            ("PUT", "/applications/{application_id}/guilds/{guild_id}/commands", self._set_guild_commands),
             ("POST", "/guilds/{guild_id}/channels", self._create_channel),
             ("GET", "/guilds/{guild_id}/members/{member_id}", self._get_member),
             ("PATCH", "/guilds/{guild_id}/members/{member_id}", self._edit_member),
@@ -692,6 +729,18 @@ class FakeDiscord:
                 "summary": "",
             }
         )
+
+    async def _set_guild_commands(self, request: web.Request, body: list[dict[str, Any]]) -> web.Response:
+        """Replace a server's slash commands with the list sent, as Discord's bulk overwrite does."""
+        guild_id = int(request.match_info["guild_id"])
+        if guild_id != GUILD_ID or self.refuse_command_registration:
+            return _error(403, 50001, "Missing Access")
+        stored = [
+            {**command, "id": str(self.next_id()), "application_id": str(BOT_USER_ID), "guild_id": str(guild_id), "version": "1"}
+            for command in body
+        ]
+        self.commands[guild_id] = stored
+        return _json(stored)
 
     async def _create_channel(self, request: web.Request, body: dict[str, Any]) -> web.Response:
         if not self._base_permissions(BOT_USER_ID) & MANAGE_CHANNELS and not self._is_admin(BOT_USER_ID):

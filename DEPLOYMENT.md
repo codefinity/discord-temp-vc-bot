@@ -56,37 +56,40 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
 
 1. Copy this link into a text editor, and replace `YOUR_APPLICATION_ID` with the ID from Step 2:
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=281475397241872&scope=bot
+   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=281475397241872&scope=bot+applications.commands
    ```
 2. Open the edited link in your browser.
 3. Choose your server and click **Continue**.
 4. Keep every permission ticked, then click **Authorize**.
 
-The number in the link, `281475397241872`, stands for exactly these ten permissions:
+The end of the link, `scope=bot+applications.commands`, adds the bot to your server and lets it add its **/topic** command. The number in the link, `281475397241872`, stands for exactly these ten permissions:
 
 | Permission | Why the bot needs it |
 |---|---|
-| **View Channels** | To see the hub, the category and the temporary channels. |
+| **View Channels** | To see the hub, the category, the temporary channels and the topic channel. |
 | **Manage Channels** | To create, rename, set limits on and delete temporary channels. |
 | **Manage Roles** | To control who can connect, which is how Lock works. On a channel, Discord calls this same permission "Manage Permissions". The bot never edits your server's roles. |
 | **Connect** | The bot never joins voice, but Discord won't let anyone edit a voice channel they can't connect to. Without this, the bot couldn't manage a locked channel. |
 | **Move Members** | To move people from the hub into their channel. |
-| **Send Messages** | To post the control panel, timer and extension question. |
-| **Embed Links** | To show the control panel and timer as embeds. |
+| **Send Messages** | To post the control panel, timer and extension question, and topic cards and invites. |
+| **Embed Links** | To show the control panel, timer and topic cards as embeds. |
 | **Attach Files** | To show the circular countdown, which is a picture attached to the timer. |
 | **Manage Nicknames** | To put a 👑 in front of a channel owner's name while they own the channel. The bot only changes owners' nicknames, and gives the old one back when the channel closes. |
 | **Set Voice Channel Status** | To set the status an owner types, the line Discord shows under a voice channel's name. Because the bot doesn't join the channel, Discord also needs it to have Manage Channels there, which it does. |
 
 **Invited the bot before the circular countdown, the crown or the channel status was added?** Open the new link once more to add Attach Files, Manage Nicknames and Set Voice Channel Status. You don't need to remove the bot first. Until you do, everything else still works: owners still have to type a status, and are told the bot couldn't set it, but the name counts and the channel isn't deleted.
 
+**Invited the bot before /topic was added?** Open the new link once more, so the bot can add the command. You don't need to remove the bot first. Until you do, the startup log says `Could not register /topic`, and everything else still works.
+
 **For the crown, put the bot's role high in the list.** Discord only lets the bot change the nickname of members whose highest role is below the bot's role, and never the server owner's. In **Server Settings**, then **Roles**, drag the bot's role above the roles your members have. Anyone above it still gets a channel, just without the crown.
 
 The bot doesn't need Administrator. Please don't give it that, since the bot works without it.
 
-## Step 4: Create the hub and the category
+## Step 4: Create the hub, the category and the topic channel
 
 1. In your Discord server, right-click the channel list and choose **Create Category**. Name it something like "Temp VCs".
 2. Create a voice channel named **Create Your Own VC**. This is the hub. It can go inside the new category or anywhere else.
+3. Create a text channel named **find-your-group**, or use one you already have. This is where members use **/topic**. It can go anywhere, and the bot needs to be able to see it and send messages there.
 
 **Three rules for the category:**
 
@@ -101,11 +104,12 @@ The bot doesn't need Administrator. Please don't give it that, since the bot wor
 1. Click the gear icon next to your name at the bottom left, to open **User Settings**.
 2. Go to **Advanced** and turn on **Developer Mode**.
 
-**Copy three IDs,** and save them somewhere:
+**Copy four IDs,** and save them somewhere:
 
 1. Right-click your **server's icon** and choose **Copy Server ID**.
 2. Right-click the **Create Your Own VC** channel and choose **Copy Channel ID**.
 3. Right-click the **category's name** and choose the **Copy ID** option.
+4. Right-click the **find-your-group** channel and choose **Copy Channel ID**.
 
 **Create your settings file:**
 
@@ -131,6 +135,7 @@ The bot doesn't need Administrator. Please don't give it that, since the bot wor
    GUILD_ID=123456789012345678
    HUB_CHANNEL_ID=234567890123456789
    TEMP_VC_CATEGORY_ID=345678901234567890
+   TOPIC_CHANNEL_ID=456789012345678901
    ```
 4. Save and close the file. In Notepad, use **File**, then **Save**, and don't choose "Save as". The name must stay exactly `.env`, not `.env.txt`.
 
@@ -148,7 +153,7 @@ The first run takes a minute or so, while uv downloads Python and everything els
 2026-11-05 21:00:00,000 INFO     temp_vc_bot.cogs.voice_events: Logged in as Temp VC Bot.
 ```
 
-Your bot now shows as online in Discord. Join **Create Your Own VC** to try it. To stop the bot, click the terminal and press **Ctrl+C**.
+Your bot now shows as online in Discord. Join **Create Your Own VC** to try it, or type **/topic** in **#find-your-group**. To stop the bot, click the terminal and press **Ctrl+C**.
 
 The bot only runs while this terminal is open. For 24/7 running, see [HOSTING.md](HOSTING.md).
 
@@ -186,6 +191,15 @@ You can share this section with your server.
 
 **When a channel closes,** everyone in it is disconnected and the channel is deleted. This also happens the moment the last person leaves, or when you end the discussion, whatever the timer says.
 
+**Finding a group with /topic:** in **#find-your-group**, type `/topic` and press Enter.
+
+1. A form asks for the channel's name, its status, and what you want to discuss. All three are required.
+2. You see a card that only you can see. **Edit** changes what you typed.
+3. **Advertise** posts the card in the chat for everyone. Anyone who wants to join clicks **I'm interested**, and their name appears on the card. Clicking it again takes their name off.
+4. When you're ready, click **Create a VC** on the card. Only you can. The bot creates a channel with your name and status, and posts a message that tags everyone who's interested, with a link to join. If you're in a voice channel, you're moved into it.
+
+You can also click **Create a VC** on your private card, to open a channel without advertising first. The channel works like any other: you're its owner, with the control panel, the timer and the crown, but there's no naming step, because it already has a name. If nobody joins within 5 minutes, it's deleted. A card nobody clicks for an hour closes. You can own one channel at a time, so end the one you have before creating another.
+
 ## Test checklist
 
 You need a friend or a second account for this. Keep the terminal open, so you can see any errors.
@@ -194,7 +208,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 1. Open `src/temp_vc_bot/constants.py` in a text editor.
 2. Change `SECONDS_PER_MINUTE = 60` to `SECONDS_PER_MINUTE = 6`, and save.
-3. Restart the bot. Everything now runs ten times faster: the 20-minute timer takes 2 minutes, the 2-minute answer window takes 12 seconds, and the extra 10 minutes take 1 minute. The messages and the ring still say the normal numbers.
+3. Restart the bot. Everything now runs ten times faster: the 20-minute timer takes 2 minutes, the 2-minute answer window takes 12 seconds, the extra 10 minutes take 1 minute, and a /topic channel nobody joins is deleted after 30 seconds. The messages and the ring still say the normal numbers.
 4. **Change it back to 60 when you've finished, and restart the bot.**
 
 **Creating a channel**
@@ -236,6 +250,17 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 - [ ] **No:** run it again and click No. The channel is deleted.
 - [ ] **No answer:** run it again and don't click. The channel is deleted when the answer window ends.
 
+**/topic**
+
+- [ ] **Wrong channel:** type `/topic` in another channel. Only you see a note saying where to use it.
+- [ ] **Form:** type `/topic` in #find-your-group. A form asks for a channel name, a status and a topic, and won't submit with an empty box.
+- [ ] **Private card:** submit it. A card appears that says only you can see it, and your friend can't see it. Click **Edit**, change the topic and submit. The card updates.
+- [ ] **Advertise:** click **Advertise**. The card appears in the chat for everyone, with **I'm interested** and **Create a VC**.
+- [ ] **Interest:** have your friend click **I'm interested**. Their name appears on the card. They click again, and it's gone. They click once more to add it back. You clicking it gets a private note.
+- [ ] **Host only:** have your friend click **Create a VC**. They get a private note, and no channel appears.
+- [ ] **Create:** while you're in a voice channel, click **Create a VC**. A channel appears with your name and status, you're moved in and get the crown, and the chat has the control panel and timer but no naming message. In #find-your-group, a message tags your friend with a link. The card shows the channel and loses its buttons. Your friend clicks the link and joins, and the timer starts.
+- [ ] **Nobody joins:** leave voice, start another topic, and click **Create a VC** on the private card. You're told it will be deleted if nobody joins. Don't join. After 5 minutes (30 seconds in fast mode) it's deleted.
+
 **Cleanup**
 
 - [ ] **Empty channel:** create a channel and leave it. It's deleted right away.
@@ -266,6 +291,16 @@ Check the terminal for these messages:
 
 If there's no message at all, make sure you restarted the bot after editing `.env`.
 
+### /topic doesn't appear, or doesn't work
+
+| What you see | Fix |
+|---|---|
+| `/topic` isn't in the list when you type `/`, and the log says `Could not register /topic` | Open the invite link from Step 3 again. It includes `applications.commands`, which lets the bot add commands. Then restart the bot. |
+| `/topic` isn't in the list, and the log has no error | Discord can take a moment to show new commands. Press **Ctrl+R** (**Cmd+R** on a Mac) to reload Discord. |
+| The log says `TOPIC_CHANNEL_ID ... is not a text channel` | That ID is wrong. Copy the find-your-group channel's ID again. |
+| `/topic` says it only works in another channel | You're in a different channel from the one in `TOPIC_CHANNEL_ID`, or that ID is wrong. |
+| **Advertise** says the bot doesn't have permission | The bot can't post in the topic channel. The startup log names what's missing. Check the channel's **Permissions** for anything that denies the bot's role. |
+
 ### Missing permissions
 
 - **The log names them.** `The bot is missing these permissions in the category: ...` lists exactly what's missing. Use the invite link from Step 3 again to fix them, and keep every permission ticked. You don't need to remove the bot first.
@@ -276,7 +311,7 @@ If there's no message at all, make sure you restarted the bot after editing `.en
 
 | What you see | Cause | Fix |
 |---|---|---|
-| "This interaction failed" when clicking a button | The bot was stopped or restarted, or the channel just closed. | Check the bot is running. Rejoin the hub for a new channel. |
+| "This interaction failed" when clicking a button | The bot was stopped or restarted, or the channel just closed. | Check the bot is running. Rejoin the hub for a new channel, or use /topic again for a new topic card. |
 | The bot says it can't find the category | The category was deleted. | Create a new one and update `TEMP_VC_CATEGORY_ID`. |
 | A new channel can't be created, and a notice appears in the hub | The category is full (Discord allows 50 channels in one) or the server is full (500). | Delete some channels. |
 | The countdown shows the wrong time | The computer's clock is wrong. | Fix the clock. On a server, see [HOSTING.md](HOSTING.md). |

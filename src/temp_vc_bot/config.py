@@ -23,6 +23,8 @@ class Settings:
     guild_id: int
     hub_channel_id: int
     temp_vc_category_id: int
+    # The text channel where /topic works, such as #find-your-group.
+    topic_channel_id: int
 
 
 def load_settings() -> Settings:
@@ -42,11 +44,12 @@ def load_settings() -> Settings:
     guild_id = _read_id("GUILD_ID", problems)
     hub_channel_id = _read_id("HUB_CHANNEL_ID", problems)
     temp_vc_category_id = _read_id("TEMP_VC_CATEGORY_ID", problems)
+    topic_channel_id = _read_id("TOPIC_CHANNEL_ID", problems)
 
     if problems:
         raise ConfigError("\n".join(f"- {problem}" for problem in problems))
 
-    return Settings(token, guild_id, hub_channel_id, temp_vc_category_id)
+    return Settings(token, guild_id, hub_channel_id, temp_vc_category_id, topic_channel_id)
 
 
 def _read_token(problems: list[str]) -> str:

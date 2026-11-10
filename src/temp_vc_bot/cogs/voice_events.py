@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -12,7 +11,6 @@ from discord.ext import commands
 from ..errors import API_ERRORS, friendly_error
 from ..services.channel_manager import human_members
 from ..state import TempVCSession
-from ..views.control_panel import ControlPanelView
 
 if TYPE_CHECKING:
     from ..bot import TempVCBot
@@ -34,10 +32,7 @@ class VoiceEvents(commands.Cog):
         self.sessions = bot.sessions
         self.channels = bot.channel_manager
         self.timers = bot.timer_service
-        self.naming = bot.naming_service
-        # Handles hub joins one at a time. Otherwise someone double-clicking the hub
-        # could get two channels, because creating a channel takes a moment.
-        self._hub_lock = asyncio.Lock()
+        self.session_setup = bot.session_setup
         self._leftovers_deleted = False
 
     # ----- Startup ----------------------------------------------------------
@@ -61,8 +56,11 @@ class VoiceEvents(commands.Cog):
         """Handle anything that changed while the bot was disconnected."""
         for session in self.sessions:
             if not session.setup_finished:
-                continue  # Still being created by _handle_hub_join, which is handling it.
-            await self._close_if_empty(session)
+                continue  # Still being set up by the hub or /topic, which will finish the job.
+            # A new channel from /topic is empty until someone arrives. Its join
+            # deadline deletes it if nobody does.
+            if not session.waiting_for_first_join:
+                await self._close_if_empty(session)
             await self.channels.refresh_user_limit(session)
             await self.timers.maybe_start(session)
 
@@ -148,7 +146,8 @@ class VoiceEvents(commands.Cog):
 
     async def _handle_hub_join(self, member: discord.Member) -> None:
         """Send a member to their existing temp VC, or create one for them."""
-        async with self._hub_lock:
+        # One at a time, and never at the same moment as /topic creating one.
+        async with self.channels.creation_lock:
             # They may have left while waiting for their turn.
             if not self._is_in_hub(member):
                 return
@@ -161,7 +160,7 @@ class VoiceEvents(commands.Cog):
         # This is outside the lock so that one slow setup can't make everybody else
         # wait for their channel.
         if session is not None:
-            await self._finish_setup(member, session)
+            await self.session_setup.finish(member, session)
 
     def _is_in_hub(self, member: discord.Member) -> bool:
         """Whether a member is in the hub right now."""
@@ -189,38 +188,6 @@ class VoiceEvents(commands.Cog):
         # Nobody ever entered this channel, so no "leave" event would ever clean it up.
         await self.channels.close_session(session, "the owner could not be moved in")
         return None
-
-    async def _finish_setup(self, owner: discord.Member, session: TempVCSession) -> None:
-        """Post the controls, then ask the owner to name the channel, then post the timer.
-
-        The naming prompt sits just above the timer. The timer is still the last
-        message, so it doesn't have to move below the prompt. The bot never joins the
-        voice channel itself. It manages the channel through its permissions, so it
-        doesn't show up in the channel or take a seat.
-        """
-        channel = self.channels.get_channel(session)
-        if channel is None or session.closed:
-            return
-
-        panel = ControlPanelView(self.channels, session)
-        session.panel_view = panel
-        try:
-            await panel.post(channel)
-            await self.naming.ask(session, channel)
-            await self.timers.post_timer_message(session, channel)
-        except API_ERRORS as error:
-            if session.closed:
-                return  # The owner left straight away, so there is nothing to report.
-            log.error("Could not post the controls in channel %s: %s", channel.id, error)
-            await self.channels.notify_in_hub(owner.id, friendly_error(error))
-        await self.channels.crown_owner(session, owner)
-        session.setup_finished = True
-
-        # Someone may have joined while those messages were being sent.
-        if session.timer_started:
-            await self.timers.publish_state(session)
-        else:
-            await self.timers.maybe_start(session)
 
 
 async def setup(bot: TempVCBot) -> None:
