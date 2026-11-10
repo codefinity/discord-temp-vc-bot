@@ -119,6 +119,11 @@ def _bot_overwrite(me: discord.Member) -> discord.PermissionOverwrite:
     # its server-level "Manage Roles" permission. See "Conflicts" in the README.
     if me.guild_permissions.administrator:
         overwrite.manage_permissions = True
+    # For the status owners can set. Discord refuses an overwrite that grants a
+    # permission the bot doesn't have in the server, so a bot invited before this
+    # was added would lose its whole overwrite, and with it every new channel.
+    if me.guild_permissions.set_voice_channel_status:
+        overwrite.set_voice_channel_status = True
     return overwrite
 
 
@@ -227,6 +232,16 @@ class ChannelManager:
             await channel.edit(name=new_name, reason="Temp VC renamed by owner")
         # Any name the owner chooses counts, even the one it already had.
         session.named.set()
+
+    async def set_status(self, session: TempVCSession, status: str) -> None:
+        """Set the line Discord shows under the channel's name.
+
+        This isn't a rename, so it doesn't use up one of the renames. The bot can
+        set it without joining the channel because it also has Manage Channels there.
+        """
+        channel = self.require_channel(session)
+        await channel.edit(status=status, reason="Temp VC status set by owner")
+        session.status = status
 
     async def set_user_limit(self, session: TempVCSession, requested_limit: int) -> int:
         """Set how many people may join. Returns how many actually fit."""
@@ -408,6 +423,11 @@ class ChannelManager:
         if not guild.me.guild_permissions.manage_nicknames:
             log.warning(
                 "The bot is missing Manage Nicknames, so channel owners won't get a crown. "
+                "Open the invite link again to add it."
+            )
+        if not guild.me.guild_permissions.set_voice_channel_status:
+            log.warning(
+                "The bot is missing Set Voice Channel Status, so owners can't set a channel status. "
                 "Open the invite link again to add it."
             )
 

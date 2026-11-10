@@ -66,6 +66,9 @@ class TempVCSession:
     # Deletes the channel if it isn't named in time.
     naming_task: asyncio.Task[None] | None = None
     name_prompt: NamePromptView | None = None
+    # The status the owner last set through the bot, used to fill in the rename form.
+    # Discord doesn't include a channel's status with the channel, so it's kept here.
+    status: str | None = None
     # The nickname with the crown that the bot gave the owner, and the one it
     # replaced. crowned_nick is None while the owner has no crown from the bot.
     crowned_nick: str | None = None

@@ -56,13 +56,13 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
 
 1. Copy this link into a text editor, and replace `YOUR_APPLICATION_ID` with the ID from Step 2:
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=420531216&scope=bot
+   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=281475397241872&scope=bot
    ```
 2. Open the edited link in your browser.
 3. Choose your server and click **Continue**.
 4. Keep every permission ticked, then click **Authorize**.
 
-The number in the link, `420531216`, stands for exactly these nine permissions:
+The number in the link, `281475397241872`, stands for exactly these ten permissions:
 
 | Permission | Why the bot needs it |
 |---|---|
@@ -75,8 +75,9 @@ The number in the link, `420531216`, stands for exactly these nine permissions:
 | **Embed Links** | To show the control panel and timer as embeds. |
 | **Attach Files** | To show the circular countdown, which is a picture attached to the timer. |
 | **Manage Nicknames** | To put a 👑 in front of a channel owner's name while they own the channel. The bot only changes owners' nicknames, and gives the old one back when the channel closes. |
+| **Set Voice Channel Status** | To set the status an owner types, the line Discord shows under a voice channel's name. Because the bot doesn't join the channel, Discord also needs it to have Manage Channels there, which it does. |
 
-**Invited the bot before the circular countdown or the crown was added?** Open the new link once more to add Attach Files and Manage Nicknames. You don't need to remove the bot first.
+**Invited the bot before the circular countdown, the crown or the channel status was added?** Open the new link once more to add Attach Files, Manage Nicknames and Set Voice Channel Status. You don't need to remove the bot first. Until you do, everything else still works: owners still have to type a status, and are told the bot couldn't set it, but the name counts and the channel isn't deleted.
 
 **For the crown, put the bot's role high in the list.** Discord only lets the bot change the nickname of members whose highest role is below the bot's role, and never the server owner's. In **Server Settings**, then **Roles**, drag the bot's role above the roles your members have. Anyone above it still gets a channel, just without the crown.
 
@@ -157,13 +158,13 @@ You can share this section with your server.
 
 **Getting a channel:** click **Create Your Own VC**. You'll be moved into your own channel within a moment. You are its owner, and a 👑 appears in front of your name until the channel closes. If you already have a channel, clicking the hub takes you back to it, even if it's full or locked.
 
-**Naming it:** the bot tags you in your channel's text chat with a **Name your channel** button. Click it, type a name and submit. **You have 2 minutes.** If the channel isn't named by then, it's deleted and everyone in it is disconnected. Renaming it from the control panel counts too.
+**Naming it:** the bot tags you in your channel's text chat with a **Name your channel** button. Click it, type a name and a status, and submit. The status is a line such as "Revising for exams" that Discord shows under the channel's name in the channel list. Both are required. **You have 2 minutes.** If the channel isn't named by then, it's deleted and everyone in it is disconnected. Renaming it from the control panel counts too.
 
 **Finding the controls:** open your channel's text chat using the chat icon on the voice channel. The bot tags you there, with a control panel. Anyone in the chat can see it, but only you can use it. Anyone else who clicks gets a private note: "Only the channel owner can do this."
 
 | Control | What it does |
 |---|---|
-| **Rename** | Opens a form for a new name, of 1 to 100 characters. Discord allows about 2 renames per 10 minutes on each channel, and naming the channel counts as one. If you reach that limit, the bot tells you when to try again. |
+| **Rename** | Opens a form for a new name, of 1 to 100 characters, and the channel's status, of up to 500. Discord allows about 2 renames per 10 minutes on each channel, and naming the channel counts as one. If you reach that limit, the bot tells you when to try again. Changing only the status isn't a rename, so it doesn't count. The status can be changed but not removed. |
 | **User limit** | Opens a form for a number from 0 to 99, where 0 means no limit. The number counts people only. If another bot, such as a music bot, joins, the bot adds a seat for it. |
 | **Locked / Unlocked** | Shows the current state, and switches it when clicked. While locked, new people can't join, but you can still get back in and people already inside stay. |
 | **Set timer length** | Choose 20, 25, 30, 35 or 40 minutes. The default is 20. You can only change this before the timer starts. |
@@ -201,7 +202,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 - [ ] Join the hub. You're moved into a new channel named after you, in the right category.
 - [ ] The bot doesn't join your channel. Only you are listed in it.
 - [ ] The text chat shows, in order: the control panel, a message tagging you with a **Name your channel** button, and a timer saying "Waiting for someone to join…" with a full grey ring.
-- [ ] Click **Name your channel**. The form opens with an empty box and won't submit without a name. Submit one. The channel gets that name and the naming message disappears.
+- [ ] Click **Name your channel**. The form opens with an empty name box and an empty status box, and won't submit unless both are filled in. Submit a name and a status. The channel gets that name, the status shows under it in the channel list, and the naming message disappears.
 - [ ] Join the hub again. You go back to the same channel, and no new one appears.
 - [ ] Have your friend join the hub. They get their own channel, the bot doesn't join it either, and their buttons work. Their **Name your channel** button gives you a private note if you click it.
 - [ ] **Crown:** while you own a channel, your name shows 👑 in front of it, in the voice channel and the member list. When the channel closes, your old name comes back. (If you're the server owner, you won't get one: Discord doesn't let bots change the owner's nickname. Test it with your friend's account.)
@@ -211,6 +212,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 - [ ] **Rename:** rename the channel. The name changes.
 - [ ] **Rename limit:** rename it once more quickly. Counting the name you gave it at the start, that's the third rename, and it tells you to try again later.
+- [ ] **Status:** straight after that, click **Rename**. The status box shows your status. Keep the name, change the status and submit. The new status shows under the channel's name, even though renames are used up. Open **Rename** again and empty the status box: the form won't submit.
 - [ ] **Limit:** set a limit of 2. The channel shows 2 seats. You and one friend can join, and a third person can't.
 - [ ] **Limit:** type `abc`. You get a private error message.
 - [ ] **Lock:** click the lock button. The label changes to Locked. Your friend can't join from outside, but you can leave and come back through the hub.
@@ -280,6 +282,7 @@ If there's no message at all, make sure you restarted the bot after editing `.en
 | The countdown shows the wrong time | The computer's clock is wrong. | Fix the clock. On a server, see [HOSTING.md](HOSTING.md). |
 | The ring looks blurred for a moment when it first appears or changes | Discord shows a blurred preview of every new picture until it has loaded. A slow connection makes it last longer. | Nothing to fix: it sharpens once loaded. The ring changes once a minute to keep this rare. |
 | The timer stays above new messages instead of moving down | The bot can't post in the channel. The log says `Could not move the timer down`. | Open the invite link from Step 3 again. |
+| The bot says it's missing the Set Voice Channel Status permission | The bot was invited with a link from before the status was added. The startup log says so too. | Open the invite link from Step 3 again. |
 | The timer shows text but no ring | The bot is missing Attach Files (the log names it at startup), or drawing failed (the log says `Could not draw the countdown ring`). | Open the invite link from Step 3 again. For a drawing error, check `uv sync` finished without errors. |
 | Timers run far too fast | `SECONDS_PER_MINUTE` is still set for testing. | Set it back to 60 in `constants.py` and restart. |
 | Channels get deleted right after they're created, or everything happens twice | Two copies of the bot are running, perhaps one on your computer and one on a server. Each sees the other's channels as leftovers. | Stop one of them. |

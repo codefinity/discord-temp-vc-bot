@@ -234,6 +234,7 @@ class TestIntentsAndInvite:
             embed_links=True,
             attach_files=True,
             manage_nicknames=True,
+            set_voice_channel_status=True,
         )
         assert documented.value == INVITE_PERMISSIONS
 
