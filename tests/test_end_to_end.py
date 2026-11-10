@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import re
 import time
 from typing import Any
@@ -30,6 +31,7 @@ from .fake_discord import (
     HUB_ID,
     INVITE_PERMISSIONS,
     MANAGE_CHANNELS,
+    MANAGE_NICKNAMES,
     MANAGE_ROLES,
     MOVE_MEMBERS,
     SEND_MESSAGES,
@@ -1287,6 +1289,129 @@ class TestNamingDeadline:
         expected = [world.panel_message(channel_id), naming_prompt(world, channel_id), world.timer_message(channel_id)]
         assert in_order == [message["id"] for message in expected]
         assert world.request_count("DELETE", f"/channels/{channel_id}/messages") == 0
+
+
+def nickname_edits(world: FakeDiscord) -> list[dict[str, Any]]:
+    """Every request the bot made to change someone's nickname."""
+    return [body for method, path, body in world.requests if method == "PATCH" and "/members/" in path and "nick" in body]
+
+
+class TestOwnerCrown:
+    async def test_owner_gets_a_crown_in_front_of_their_name(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, _ = await make_vc(world, "Alice")
+        assert world.nick_of(owner) == "👑 Alice"
+
+    async def test_crown_comes_off_when_the_channel_closes(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world, "Alice")
+        await world.leave_voice(owner)
+        await world.wait_for(lambda: channel_id not in world.channels)
+        await world.settle()
+        assert world.nick_of(owner) is None
+
+    async def test_an_existing_nickname_is_kept_and_given_back(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner = world.add_member("Alice")
+        world.members[owner]["nick"] = "Ali"
+        await world.join_voice(owner, HUB_ID)
+        await world.settle()
+        assert world.nick_of(owner) == "👑 Ali"
+        await world.leave_voice(owner)
+        await world.settle()
+        assert world.nick_of(owner) == "Ali"
+
+    async def test_a_nickname_the_owner_changed_meanwhile_is_left_alone(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, _ = await make_vc(world, "Alice")
+        world.members[owner]["nick"] = "Queen Alice"  # The bot hears nothing about this.
+        await world.leave_voice(owner)
+        await world.settle()
+        assert world.nick_of(owner) == "Queen Alice"
+
+    async def test_a_nickname_changed_while_in_voice_is_the_one_crowned_and_given_back(self, world: FakeDiscord, start_bot: BotStarter) -> None:
+        # discord.py keeps its copy of a member while they're in voice, and the bot
+        # hears nothing when their nickname changes, so that copy goes out of date.
+        lounge = world.add_channel("Lounge")
+        await start_bot()
+        owner = world.add_member("Alice")
+        await world.join_voice(owner, lounge)
+        await world.settle()
+        world.members[owner]["nick"] = "Ali"
+        await world.join_voice(owner, HUB_ID)
+        await world.settle()
+        assert world.nick_of(owner) == "👑 Ali"
+        await world.leave_voice(owner)
+        await world.settle()
+        assert world.nick_of(owner) == "Ali", "Giving back the out-of-date nickname would undo their change."
+
+    async def test_an_owner_whose_old_crown_came_off_while_in_voice_gets_a_new_one(self, world: FakeDiscord, start_bot: BotStarter) -> None:
+        lounge = world.add_channel("Lounge")
+        await start_bot()
+        owner, channel_id = await make_vc(world, "Alice")
+        bob = world.add_member("Bob")
+        await world.join_voice(bob, channel_id)
+        await world.leave_voice(owner)
+        await world.join_voice(owner, lounge)  # discord.py's copy of them now has the crown.
+        await world.leave_voice(bob)
+        await world.wait_for(lambda: channel_id not in world.channels)
+        await world.settle()
+        assert world.nick_of(owner) is None
+        await world.join_voice(owner, HUB_ID)
+        await world.settle()
+        assert world.nick_of(owner) == "👑 Alice"
+
+    async def test_owner_keeps_the_crown_while_away_from_a_channel_others_are_in(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, channel_id = await make_vc(world, "Alice")
+        await world.join_voice(world.add_member("Bob"), channel_id)
+        await world.leave_voice(owner)
+        await world.settle()
+        assert world.nick_of(owner) == "👑 Alice", "They still own it, and can come back through the hub."
+
+    async def test_a_long_name_is_cut_to_fit_discords_limit(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        owner, _ = await make_vc(world, "x" * 40)
+        nick = world.nick_of(owner)
+        assert nick is not None and nick.startswith("👑 xxx")
+        assert len(nick.encode("utf-16-le")) // 2 <= 32
+
+    async def test_the_server_owner_gets_no_crown_but_still_gets_a_channel(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level(logging.INFO)
+        owner = world.add_member("Alice")
+        world.owner_id = owner
+        await start_bot()
+        await world.join_voice(owner, HUB_ID)
+        await world.settle()
+        assert world.voice[owner] == int(world.only_temp_channel()["id"])
+        assert world.nick_of(owner) is None
+        assert nickname_edits(world) == [], "Discord would refuse, so the bot doesn't try."
+        assert f"No crown for member {owner}: they own the server" in caplog.text
+
+    async def test_someone_ranked_above_the_bot_gets_no_crown_but_still_gets_a_channel(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level(logging.INFO)
+        moderator = world.add_role("Moderator", position=2)
+        owner = world.add_member("Alice", roles=(moderator,))
+        await start_bot()
+        await world.join_voice(owner, HUB_ID)
+        await world.settle()
+        assert world.voice[owner] == int(world.only_temp_channel()["id"])
+        assert nickname_edits(world) == []
+        assert "their highest role, Moderator, isn't below the bot's role" in caplog.text
+
+    async def test_without_manage_nicknames_there_is_no_crown_and_the_log_says_why(self, world: FakeDiscord, start_bot: BotStarter, caplog: pytest.LogCaptureFixture) -> None:
+        caplog.set_level(logging.INFO)
+        world.bot_permissions = INVITE_PERMISSIONS & ~MANAGE_NICKNAMES
+        await start_bot()
+        assert "missing Manage Nicknames, so channel owners won't get a crown" in caplog.text
+        owner, _ = await make_vc(world, "Alice")
+        assert world.nick_of(owner) is None
+        assert f"No crown for member {owner}: the bot is missing Manage Nicknames" in caplog.text
+
+    @pytest.mark.parametrize(("crowned", "expected"), [("👑 Alice", None), ("👑 Ali", "Ali")])
+    async def test_a_crown_left_by_a_restart_comes_off_at_startup(self, world: FakeDiscord, start_bot: BotStarter, crowned: str, expected: str | None) -> None:
+        owner = world.add_member("Alice")
+        world.members[owner]["nick"] = crowned
+        bot_mark = {"id": str(BOT_USER_ID), "type": 1, "allow": str(MANAGE_CHANNELS | CONNECT), "deny": "0"}
+        owner_access = {"id": str(owner), "type": 1, "allow": str(VIEW_CHANNEL | CONNECT), "deny": "0"}
+        leftover = world.add_channel("Old VC", parent_id=CATEGORY_ID, overwrites=[bot_mark, owner_access])
+        await start_bot()
+        assert leftover not in world.channels
+        assert world.nick_of(owner) == expected
 
 
 class TestDiscordSizeLimits:

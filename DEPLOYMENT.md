@@ -56,13 +56,13 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
 
 1. Copy this link into a text editor, and replace `YOUR_APPLICATION_ID` with the ID from Step 2:
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=286313488&scope=bot
+   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=420531216&scope=bot
    ```
 2. Open the edited link in your browser.
 3. Choose your server and click **Continue**.
 4. Keep every permission ticked, then click **Authorize**.
 
-The number in the link, `286313488`, stands for exactly these eight permissions:
+The number in the link, `420531216`, stands for exactly these nine permissions:
 
 | Permission | Why the bot needs it |
 |---|---|
@@ -74,8 +74,11 @@ The number in the link, `286313488`, stands for exactly these eight permissions:
 | **Send Messages** | To post the control panel, timer and extension question. |
 | **Embed Links** | To show the control panel and timer as embeds. |
 | **Attach Files** | To show the circular countdown, which is a picture attached to the timer. |
+| **Manage Nicknames** | To put a 👑 in front of a channel owner's name while they own the channel. The bot only changes owners' nicknames, and gives the old one back when the channel closes. |
 
-**Invited the bot before the circular countdown was added?** Open the new link once more to add Attach Files. You don't need to remove the bot first.
+**Invited the bot before the circular countdown or the crown was added?** Open the new link once more to add Attach Files and Manage Nicknames. You don't need to remove the bot first.
+
+**For the crown, put the bot's role high in the list.** Discord only lets the bot change the nickname of members whose highest role is below the bot's role, and never the server owner's. In **Server Settings**, then **Roles**, drag the bot's role above the roles your members have. Anyone above it still gets a channel, just without the crown.
 
 The bot doesn't need Administrator. Please don't give it that, since the bot works without it.
 
@@ -152,7 +155,7 @@ The bot only runs while this terminal is open. For 24/7 running, see [HOSTING.md
 
 You can share this section with your server.
 
-**Getting a channel:** click **Create Your Own VC**. You'll be moved into your own channel within a moment. You are its owner. If you already have a channel, clicking the hub takes you back to it, even if it's full or locked.
+**Getting a channel:** click **Create Your Own VC**. You'll be moved into your own channel within a moment. You are its owner, and a 👑 appears in front of your name until the channel closes. If you already have a channel, clicking the hub takes you back to it, even if it's full or locked.
 
 **Naming it:** the bot tags you in your channel's text chat with a **Name your channel** button. Click it, type a name and submit. **You have 2 minutes.** If the channel isn't named by then, it's deleted and everyone in it is disconnected. Renaming it from the control panel counts too.
 
@@ -201,6 +204,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 - [ ] Click **Name your channel**. The form opens with an empty box and won't submit without a name. Submit one. The channel gets that name and the naming message disappears.
 - [ ] Join the hub again. You go back to the same channel, and no new one appears.
 - [ ] Have your friend join the hub. They get their own channel, the bot doesn't join it either, and their buttons work. Their **Name your channel** button gives you a private note if you click it.
+- [ ] **Crown:** while you own a channel, your name shows 👑 in front of it, in the voice channel and the member list. When the channel closes, your old name comes back. (If you're the server owner, you won't get one: Discord doesn't let bots change the owner's nickname. Test it with your friend's account.)
 - [ ] **Unnamed channel:** create a channel and don't name it. After 2 minutes (12 seconds in fast mode) it's deleted, and the hub's chat tags you to say it wasn't named in time.
 
 **Controls**
@@ -233,7 +237,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 **Cleanup**
 
 - [ ] **Empty channel:** create a channel and leave it. It's deleted right away.
-- [ ] **Restart:** create a channel, press Ctrl+C in the terminal, and start the bot again. The old channel is deleted, and the hub is still there.
+- [ ] **Restart:** create a channel, press Ctrl+C in the terminal, and start the bot again. The old channel is deleted, the owner's crown comes off, and the hub is still there.
 
 ## Troubleshooting
 

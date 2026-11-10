@@ -233,6 +233,7 @@ class TestIntentsAndInvite:
             send_messages=True,
             embed_links=True,
             attach_files=True,
+            manage_nicknames=True,
         )
         assert documented.value == INVITE_PERMISSIONS
 

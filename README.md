@@ -2,7 +2,7 @@
 
 A Discord bot that gives each member their own voice channel on a timer.
 
-A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to name the channel: if they don't within 2 minutes, the channel is deleted. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to name the channel: if they don't within 2 minutes, the channel is deleted. While they own it, the owner has a 👑 in front of their name. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
 
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
@@ -30,7 +30,7 @@ temp-vc-bot/
 │   ├── cogs/
 │   │   └── voice_events.py     Hub joins, people joining and leaving, startup
 │   ├── services/
-│   │   ├── channel_manager.py  Create, delete, rename, lock, limit
+│   │   ├── channel_manager.py  Create, delete, rename, lock, limit, owner's crown
 │   │   ├── naming.py           Deletes a channel that isn't named in time (added)
 │   │   └── timer.py            Countdown, extension, auto-close
 │   └── views/
@@ -122,6 +122,10 @@ The brief left these open. Each one is easy to change.
 
 - Ownership doesn't transfer. If the owner leaves while others stay, the channel keeps running and the owner can return through the hub. If they don't answer the prompt, the channel closes.
 - The owner's only special powers are the panel, and being able to connect when the channel is locked or full (through the hub). They get no Discord permissions to edit the channel by hand.
+- The owner gets a 👑 (`OWNER_CROWN`) in front of their nickname, so people can see who owns the channel. It shows wherever their name does on the server, not only in the channel, and stays while they're away from a channel others are still in. When the channel closes, the bot gives back their old nickname, unless they changed it in the meantime.
+- Discord doesn't let the bot change the server owner's nickname, or anyone's whose highest role is level with or above the bot's. Those owners get no crown, and everything else works the same. The bot needs Manage Nicknames for the crown, and the startup log says if it's missing.
+- Nicknames are at most 32 characters, so a long name is cut short after the crown.
+- If the bot stops before a channel closes, the startup cleanup takes the crown off. It finds the owner through the leftover channel's permissions. The old nickname was lost in the restart, so the bot just removes the crown, or clears the nickname if what's left is the person's account name.
 
 **Bots**
 

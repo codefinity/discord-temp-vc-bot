@@ -52,6 +52,7 @@ MIN_CHANNEL_NAME_LENGTH = 1
 MAX_CHANNEL_NAME_LENGTH = 100
 NO_USER_LIMIT = 0  # Discord treats a user limit of 0 as "no limit".
 MAX_USER_LIMIT = 99  # The most seats a voice channel can have.
+MAX_NICKNAME_LENGTH = 32
 
 # ---------------------------------------------------------------------------
 # Connection settings, in seconds
@@ -70,6 +71,9 @@ DELETE_ATTEMPTS = 3  # Tries at deleting a channel while being rate limited.
 # ---------------------------------------------------------------------------
 # The name a channel has until its owner names it.
 CHANNEL_NAME_TEMPLATE = "{name}'s VC"
+# Put in front of the owner's nickname while they own a channel, so people can
+# see who it is. Changing this also changes what the startup cleanup looks for.
+OWNER_CROWN = "👑 "
 
 # ---------------------------------------------------------------------------
 # Button and dropdown labels

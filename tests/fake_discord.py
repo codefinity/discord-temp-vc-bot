@@ -11,6 +11,10 @@ Discord's documentation:
 - A locked or full channel refuses people, unless they have Move Members.
 - Moving someone who isn't in voice fails.
 - A channel can be renamed about twice per 10 minutes, then Discord answers 429.
+- Changing a nickname needs Manage Nicknames, never works on the server owner,
+  and only works on members whose highest role is below the bot's. Nicknames are
+  at most 32 characters. Without the privileged Members intent, the bot hears
+  nothing when a nickname changes.
 - New channels in a server are counted over 24 hours, from the first one. The reply
   to each creation says how many are left and when the count resets. Discord doesn't
   publish the number, so tests choose it.
@@ -47,10 +51,11 @@ READ_MESSAGE_HISTORY = 1 << 16
 CONNECT = 1 << 20
 SPEAK = 1 << 21
 MOVE_MEMBERS = 1 << 24
+MANAGE_NICKNAMES = 1 << 27
 MANAGE_ROLES = 1 << 28
 
 # The exact number in the invite link in DEPLOYMENT.md.
-INVITE_PERMISSIONS = 286313488
+INVITE_PERMISSIONS = 420531216
 EVERYONE_PERMISSIONS = VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | READ_MESSAGE_HISTORY | CONNECT | SPEAK
 
 GUILD_ID = 1000
@@ -129,6 +134,9 @@ class FakeDiscord:
 
     def __init__(self, *, bot_permissions: int = INVITE_PERMISSIONS) -> None:
         self.bot_permissions = bot_permissions
+        self.owner_id = 1  # The server owner. Tests can make one of their members the owner.
+        # Roles besides @everyone and the bot's, as Discord role objects.
+        self.extra_roles: list[dict[str, Any]] = []
         self.channels: dict[int, dict[str, Any]] = {}
         self.members: dict[int, dict[str, Any]] = {}
         self.voice: dict[int, int] = {}  # Member ID -> voice channel ID.
@@ -164,10 +172,19 @@ class FakeDiscord:
     def next_id(self) -> int:
         return next(self._ids)
 
-    def add_member(self, name: str, *, bot: bool = False) -> int:
+    def add_member(self, name: str, *, bot: bool = False, roles: tuple[int, ...] = ()) -> int:
         member_id = self.next_id()
-        self.members[member_id] = self._member_payload(member_id, name, bot=bot, roles=[])
+        self.members[member_id] = self._member_payload(member_id, name, bot=bot, roles=[str(r) for r in roles])
         return member_id
+
+    def add_role(self, name: str, *, position: int) -> int:
+        """Add a role with no permissions. The bot's own role is at position 1."""
+        role_id = self.next_id()
+        self.extra_roles.append({"id": str(role_id), "name": name, "permissions": "0", "position": position})
+        return role_id
+
+    def nick_of(self, member_id: int) -> str | None:
+        return self.members[member_id].get("nick")
 
     def add_channel(
         self,
@@ -235,15 +252,19 @@ class FakeDiscord:
             }
         return payload
 
-    def _guild_payload(self) -> dict[str, Any]:
-        roles = [
+    def _roles(self) -> list[dict[str, Any]]:
+        return [
             {"id": str(EVERYONE_ROLE_ID), "name": "@everyone", "permissions": str(EVERYONE_PERMISSIONS), "position": 0},
             {"id": str(BOT_ROLE_ID), "name": "TempVC", "permissions": str(self.bot_permissions), "position": 1},
+            *self.extra_roles,
         ]
+
+    def _guild_payload(self) -> dict[str, Any]:
+        roles = self._roles()
         return {
             "id": str(GUILD_ID),
             "name": "Test server",
-            "owner_id": "1",
+            "owner_id": str(self.owner_id),
             "unavailable": False,
             "member_count": len(self.members),
             "large": False,
@@ -499,6 +520,7 @@ class FakeDiscord:
             ("GET", "/users/@me", self._get_me),
             ("GET", "/oauth2/applications/@me", self._get_application),
             ("POST", "/guilds/{guild_id}/channels", self._create_channel),
+            ("GET", "/guilds/{guild_id}/members/{member_id}", self._get_member),
             ("PATCH", "/guilds/{guild_id}/members/{member_id}", self._edit_member),
             ("PUT", "/channels/{channel_id}/permissions/{target_id}", self._set_overwrite),
             ("DELETE", "/channels/{channel_id}/permissions/{target_id}", self._delete_overwrite),
@@ -703,8 +725,19 @@ class FakeDiscord:
         )
         return None
 
+    async def _get_member(self, request: web.Request, body: dict[str, Any]) -> web.Response:
+        member = self.members.get(int(request.match_info["member_id"]))
+        return _json(member) if member is not None else _error(404, 10007, "Unknown Member")
+
     async def _edit_member(self, request: web.Request, body: dict[str, Any]) -> web.Response:
         member_id = int(request.match_info["member_id"])
+        if member_id not in self.members:
+            return _error(404, 10007, "Unknown Member")
+        if "nick" in body:
+            refusal = self._refuse_nickname(member_id, body["nick"])
+            if refusal:
+                return refusal
+            self.members[member_id]["nick"] = body["nick"] or None
         if "channel_id" not in body:
             return _json(self.members[member_id])
         channel_id = int(body["channel_id"])
@@ -716,6 +749,21 @@ class FakeDiscord:
             return _error(400, 40032, "Target user is not connected to voice.")
         await self.join_voice(member_id, channel_id)
         return _json(self.members[member_id])
+
+    def _refuse_nickname(self, member_id: int, nick: str | None) -> web.Response | None:
+        """Apply Discord's rules for changing someone else's nickname."""
+        if not self._base_permissions(BOT_USER_ID) & MANAGE_NICKNAMES and not self._is_admin(BOT_USER_ID):
+            return _error(403, 50013, "Missing Permissions")
+        # Not even an administrator can change the owner's nickname, or a higher member's.
+        if member_id == self.owner_id or self._top_position(member_id) >= self._top_position(BOT_USER_ID):
+            return _error(403, 50013, "Missing Permissions")
+        if nick is not None and len(nick) > 32:
+            return _error(400, 50035, "Invalid Form Body")
+        return None
+
+    def _top_position(self, member_id: int) -> int:
+        positions = {int(role["id"]): role["position"] for role in self._roles()}
+        return max((positions.get(int(role_id), 0) for role_id in self.members[member_id]["roles"]), default=0)
 
     def _bot_can_manage_permissions(self, channel_id: int) -> bool:
         return bool(self.effective_permissions(channel_id, BOT_USER_ID) & MANAGE_ROLES)

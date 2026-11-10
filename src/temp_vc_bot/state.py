@@ -66,6 +66,10 @@ class TempVCSession:
     # Deletes the channel if it isn't named in time.
     naming_task: asyncio.Task[None] | None = None
     name_prompt: NamePromptView | None = None
+    # The nickname with the crown that the bot gave the owner, and the one it
+    # replaced. crowned_nick is None while the owner has no crown from the bot.
+    crowned_nick: str | None = None
+    original_nick: str | None = None
 
     @property
     def timer_started(self) -> bool:
