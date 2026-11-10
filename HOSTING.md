@@ -7,7 +7,7 @@ This guide compares places to run the bot 24/7, recommends one, and walks throug
 ## What the bot needs
 
 - **It must run 24/7.** The bot is a long-lived process that holds a websocket connection open to Discord. When it stops, channels stop being created and timers stop running.
-- **It serves no website.** It only makes outgoing connections, so it needs no domain, no web server and no open ports. It joins voice only for a few seconds at a time, to play **/timer**'s beeps and ring, and that needs outgoing UDP. An ordinary server allows it.
+- **It serves no website.** It only makes outgoing connections, so it needs no domain, no web server and no open ports. It never joins voice, so it doesn't need UDP either.
 - **It needs very little.** I measured about **75 MB of memory** on Linux: about 50 MB for the bot, and 25 MB for the `uv run` process that starts it. The bot spends nearly all its time waiting for events.
 
 **What won't work:**
@@ -20,7 +20,7 @@ This guide compares places to run the bot 24/7, recommends one, and walks throug
 | Host | Monthly price | Stays on 24/7? | Limits | Catches |
 |---|---|---|---|---|
 | **RackNerd** 1 GB VPS | **$1.83** ($21.99 billed yearly) | Yes | 1 vCPU, 1 GB RAM, 20 GB SSD, 3 TB transfer, 1 IPv4 | You pay for the year up front. It's a promotion "while available". The SLA promises 99.999% for network and power, with account credit as compensation, and gives no figure for the server itself. |
-| **Fly.io** shared-cpu-1x | **$2.21** (its own "Discord bot" example: $2.19 plus 1 GB of data) | Yes | 256 MB RAM | No free tier. The trial is $1 of credit, and trial machines stop after 5 minutes. A card is required after that. You deploy with Docker and its own tool, so the steps below don't apply. Its docs don't say whether outgoing UDP works, so /timer's sound is unconfirmed. |
+| **Fly.io** shared-cpu-1x | **$2.21** (its own "Discord bot" example: $2.19 plus 1 GB of data) | Yes | 256 MB RAM | No free tier. The trial is $1 of credit, and trial machines stop after 5 minutes. A card is required after that. You deploy with Docker and its own tool, so the steps below don't apply. |
 | **Google Cloud** e2-micro | **About $3.65** (the server is free, its public IP isn't) | Yes | 0.25 vCPU sustained, 1 GB RAM, 30 GB standard disk, 1 GB of free data a month, 3 US regions | Widely described as free, but a public IPv4 costs $0.005 an hour with only 1 free hour a month. A billing account and card are required. The 90-day trial must be upgraded, or the server is stopped. The console's default disk isn't covered, which reportedly adds about $3. |
 | **DigitalOcean** Basic | **$4.00** | Yes | 1 vCPU, 512 MiB RAM, 10 GiB SSD, 500 GiB transfer, 1 IPv4 | You pay by card or PayPal. The pricing page gives no uptime figure. Otherwise few surprises: billing is monthly, and new users get $5 of credit. |
 | **Oracle Cloud** Always Free E2.1.Micro | **$0** | **Not reliably** | 1/8 OCPU, 1 GB RAM, 50 Mbps, up to 2 servers | Oracle may reclaim a server as idle if, over 7 days, its CPU stays under 20% at the 95th percentile and its network use stays under 20%. This bot would meet that test. You can only create it in your home region, and creation can fail with "out of host capacity". Third-party guides say a card is required. |
@@ -28,7 +28,7 @@ This guide compares places to run the bot 24/7, recommends one, and walks throug
 
 **Also checked, and ruled out:**
 
-- **Railway** has a $0 plan with $1 of usage credit a month, which doesn't roll over. At $10 per GB of memory per month, this bot's 75 MB alone costs about $0.75, before CPU, so the margin is thin. Railway's pages don't say what happens when the credit runs out, or whether outgoing UDP works. The Hobby plan costs $5.
+- **Railway** has a $0 plan with $1 of usage credit a month, which doesn't roll over. At $10 per GB of memory per month, this bot's 75 MB alone costs about $0.75, before CPU, so the margin is thin. Railway's pages don't say what happens when the credit runs out. The Hobby plan costs $5.
 - **Render** has no free plan for background workers. Its free web services stop after 15 minutes with no incoming traffic and have a cap of 750 hours a month. Render's paid Starter price wasn't visible on the pages I could read. Third-party comparisons put it at about $7.
 - **Koyeb's** free instance can't run as a worker, and it stops after 1 hour with no incoming traffic.
 - **Hetzner** lists CX23 at €5.99 and CAX11 at €6.49 before VAT, but both show "currently unavailable" to new customers.
@@ -69,11 +69,11 @@ You'll type commands into the server over SSH, a secure remote connection. Windo
    ssh root@YOUR_SERVER_IP
    ```
    Type `yes` if asked about the server's fingerprint, then enter the password. Nothing appears as you type it, which is normal.
-5. Change the password, and install updates, git and Opus. Opus is what the bot uses to play **/timer**'s beeps and ring. Without it, everything else still works and /timer is silent:
+5. Change the password, and install updates and git:
    ```
    passwd
    apt update && apt upgrade -y
-   apt install -y git libopus0
+   apt install -y git
    ```
 6. Create a separate user to run the bot, so it doesn't run with full control of the server:
    ```
@@ -248,10 +248,10 @@ A restart deletes every temporary channel, even with people in them, so pick a q
    systemctl status temp-vc-bot
    ```
 
-**Updating the bot's libraries.** Discord changes its voice requirements from time to time. If /timer's sound stops working, or you want the latest fixes, run this on your own computer, test the bot, and then deploy it as above:
+**Updating the bot's libraries.** For the latest fixes, run this on your own computer, test the bot, and then deploy it as above:
 
 ```
-uv lock --upgrade-package discord-py --upgrade-package davey
+uv lock --upgrade-package discord-py
 uv sync
 uv run pytest
 ```
@@ -274,7 +274,6 @@ All read on 5 November 2026.
 **Fly.io**
 - [Pricing, including the Discord bot example](https://docs.fly.io/about/pricing)
 - [Free trial](https://docs.fly.io/about/free-trial)
-- [UDP and TCP](https://docs.fly.io/networking/udp-and-tcp/)
 
 **Google Cloud**
 - [Free Tier limits](https://docs.cloud.google.com/free/docs/free-cloud-features)

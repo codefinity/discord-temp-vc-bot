@@ -215,18 +215,12 @@ MAX_USER_TIMER_MINUTES = 60
 # is a new picture, with Discord's blurred preview for a moment, so a smaller step
 # looks smoother but blurs more often. Discord allows about 5 edits per 5 seconds.
 USER_TIMER_REDRAW_SECONDS = 10
-# Before a /timer starts or carries on, it shows 3, 2, 1 and beeps on each number.
+# Before a /timer starts or carries on, it shows 3, 2, 1. The bot plays no sound,
+# because that would mean joining the voice channel.
 COUNT_IN_FROM = 3
 COUNT_IN_BEAT_SECONDS = 1.0  # The gap between those numbers, in real seconds.
-RING_SECONDS = 3  # How long the bot rings when a /timer reaches zero, in real seconds.
-# The bot joins the voice channel only to beep or ring, and leaves straight after.
-# Joining takes a second or two, and if the bot is making a sound in another channel,
-# it waits its turn: Discord allows a bot in one voice channel per server. This is
-# the longest it waits, in real seconds. After that the timer carries on silently.
-# It starts joining this long before a /timer ends, so the ring isn't late.
-SOUND_JOIN_SECONDS = 5
 
-TIMER_COMMAND_DESCRIPTION = "Show a countdown in this voice channel's chat, with a beep to start and a ring at the end."
+TIMER_COMMAND_DESCRIPTION = "Show a countdown in this voice channel's chat, with Start, Pause and Stop buttons."
 TIMER_MINUTES_DESCRIPTION = f"How long it runs, from {MIN_USER_TIMER_MINUTES} to {MAX_USER_TIMER_MINUTES} minutes"
 START_LABEL = "Start"
 PAUSE_LABEL = "Pause"

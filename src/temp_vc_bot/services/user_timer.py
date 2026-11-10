@@ -1,7 +1,10 @@
-"""Timers people set with /timer: the count-in, the countdown and the ring.
+"""Timers people set with /timer: the count-in and the countdown.
 
 These are only for the people in a channel. services/timer.py runs the channel's
 own timer, which decides when the channel closes, and this file never changes it.
+
+They make no sound. Playing one would mean the bot joining the voice channel, and
+it stays out of voice, so it isn't listed in any channel and takes no seat.
 """
 
 from __future__ import annotations
@@ -16,12 +19,10 @@ from datetime import datetime, timedelta
 
 import discord
 
-from .. import countdown_ring, sounds
+from .. import countdown_ring
 from ..constants import (
     COUNT_IN_BEAT_SECONDS,
     COUNT_IN_FROM,
-    RING_SECONDS,
-    SOUND_JOIN_SECONDS,
     TIMER_FOOTER,
     USER_TIMER_REDRAW_SECONDS,
     minutes_to_delta,
@@ -30,7 +31,6 @@ from ..errors import API_ERRORS, ChannelGoneError
 from ..state import TempVCSession, UserTimer, UserTimerPhase
 from ..views.user_timer import UserTimerView
 from .channel_manager import ChannelManager
-from .speaker import Speaker
 from .timer import redraw_times
 
 log = logging.getLogger(__name__)
@@ -63,8 +63,7 @@ def user_timer_face(timer: UserTimer, now: datetime) -> tuple[float, str, str]:
     fraction_left = left / timer.length
     match timer.phase:
         case UserTimerPhase.COUNTING_IN:
-            # The time left until the bot is ready to beep, then 3, 2, 1.
-            return fraction_left, str(timer.count) if timer.count else clock(left), "get ready"
+            return fraction_left, str(timer.count), "get ready"
         case UserTimerPhase.READY:
             caption = "ready"
         case UserTimerPhase.RUNNING:
@@ -82,10 +81,7 @@ def _timer_text(timer: UserTimer) -> str:
     """The embed's wording for the timer's current phase."""
     match timer.phase:
         case UserTimerPhase.READY:
-            text = (
-                f"Click **Start** when everyone's ready. It counts down from {COUNT_IN_FROM} first, "
-                "with a beep on each number."
-            )
+            text = f"Click **Start** when everyone's ready. It counts down from {COUNT_IN_FROM} first."
         case UserTimerPhase.COUNTING_IN:
             text = "Starting…"
         case UserTimerPhase.RUNNING:
@@ -134,9 +130,8 @@ async def draw_user_timer_ring(timer: UserTimer, as_of: datetime) -> discord.Fil
 class UserTimerService:
     """Runs the timers people set with /timer, at most one per temp VC."""
 
-    def __init__(self, channels: ChannelManager, speaker: Speaker) -> None:
+    def __init__(self, channels: ChannelManager) -> None:
         self.channels = channels
-        self.speaker = speaker
 
     # ----- Setting one up ---------------------------------------------------
 
@@ -172,19 +167,19 @@ class UserTimerService:
     async def start(self, timer: UserTimer, click: discord.Interaction) -> None:
         """Count in, then start the countdown, or carry it on after a pause.
 
-        The click is answered by showing "get ready" straight away. That edit goes
-        through the click rather than the channel, so it doesn't count towards
-        Discord's limit of about 5 edits per 5 seconds in a channel. The count-in's
-        3, 2, 1 and start already make 4.
+        The click is answered by showing the 3 straight away. That edit goes through
+        the click rather than the channel, so it doesn't count towards Discord's limit
+        of about 5 edits per 5 seconds in a channel.
         """
         async with timer.message_lock:  # An edit from Pause may still be on its way.
             if timer.phase not in (UserTimerPhase.READY, UserTimerPhase.PAUSED):
                 await click.response.defer()  # Someone else got there first.
                 return
             timer.count_in()
+            shown_at = discord.utils.utcnow()
             # Started inside the lock, so its first edit waits until this one is done.
-            timer.task = asyncio.create_task(self._run(timer), name=f"user-timer-{timer.channel_id}")
-            embed, files, view = await self._render(timer, discord.utils.utcnow())
+            timer.task = asyncio.create_task(self._run(timer, shown_at), name=f"user-timer-{timer.channel_id}")
+            embed, files, view = await self._render(timer, shown_at)
             await click.response.edit_message(embed=embed, attachments=files, view=view)
 
     async def pause(self, timer: UserTimer) -> None:
@@ -239,10 +234,10 @@ class UserTimerService:
 
     # ----- Running it -------------------------------------------------------
 
-    async def _run(self, timer: UserTimer) -> None:
-        """Count in, count down and ring. Runs as a background task."""
+    async def _run(self, timer: UserTimer, first_number_at: datetime) -> None:
+        """Count in, then count down. Runs as a background task."""
         try:
-            await self._count_in(timer)
+            await self._count_in(timer, first_number_at)
             await self._count_down(timer)
         except Exception:
             # Cancelling isn't an Exception, so Pause and Stop skip this.
@@ -251,57 +246,29 @@ class UserTimerService:
                 timer.stop(discord.utils.utcnow())
                 await self._wind_up(timer)
 
-    async def _count_in(self, timer: UserTimer) -> None:
-        """Show 3, 2, 1, a beat apart, beeping on each, then start the countdown."""
+    async def _count_in(self, timer: UserTimer, first_number_at: datetime) -> None:
+        """Show the rest of the numbers a beat apart, then start the countdown.
+
+        The first number went up at `first_number_at`, when Start was clicked. The rest
+        follow on a schedule from that moment, so a slow edit can't push them later.
+        """
         beat = timedelta(seconds=COUNT_IN_BEAT_SECONDS)
-        sound = await asyncio.to_thread(sounds.count_in, COUNT_IN_FROM, COUNT_IN_BEAT_SECONDS)
-        channel = self.channels.voice_channel(timer.channel_id)
-        ready_by = discord.utils.utcnow() + timedelta(seconds=SOUND_JOIN_SECONDS)
-        async with self.speaker.joined(channel, by=ready_by) as voice:
-            if voice is not None:
-                voice.start(sound)
-            # The sound times its own beeps. The numbers are shown on the same schedule,
-            # from the moment it started, so a slow edit can't push the rest later.
-            first_beep = discord.utils.utcnow() + timedelta(seconds=sounds.LEAD_IN_SECONDS)
-            for index, number in enumerate(range(COUNT_IN_FROM, 0, -1)):
-                await discord.utils.sleep_until(first_beep + index * beat)
-                timer.count = number
-                await self.refresh(timer)
-            go = first_beep + COUNT_IN_FROM * beat
-            await discord.utils.sleep_until(go)
-            timer.run(go)
-            await self.refresh(timer, as_of=go)
-            if voice is not None:
-                await voice.wait()  # The higher beep at the start, before the bot leaves.
+        for steps, number in enumerate(range(COUNT_IN_FROM - 1, 0, -1), start=1):
+            await discord.utils.sleep_until(first_number_at + steps * beat)
+            timer.count = number
+            await self.refresh(timer)
+        go = first_number_at + COUNT_IN_FROM * beat
+        await discord.utils.sleep_until(go)
+        timer.run(go)
+        await self.refresh(timer, as_of=go)
 
     async def _count_down(self, timer: UserTimer) -> None:
-        """Redraw the ring until the time is up, then show that, and ring."""
+        """Redraw the ring until the time is up, then show that."""
         assert timer.ends_at is not None, "The countdown starts when the timer runs."
-        ends_at = timer.ends_at
-        # The ring runs alongside, so joining voice can never make the timer finish late.
-        ring = asyncio.create_task(self._ring(timer, ends_at), name=f"user-timer-ring-{timer.channel_id}")
-        try:
-            async with self._redrawing(timer, ends_at):
-                await discord.utils.sleep_until(ends_at)
-            timer.finish()
-            await self._wind_up(timer)
-            await ring
-        finally:
-            # Pausing or stopping cancels the ring too, and the bot leaves voice.
-            ring.cancel()
-
-    async def _ring(self, timer: UserTimer, ends_at: datetime) -> None:
-        """Join the channel shortly before `ends_at`, and ring once the time is up."""
-        join_time = timedelta(seconds=SOUND_JOIN_SECONDS)
-        sound = await asyncio.to_thread(sounds.ring, RING_SECONDS)
-        await discord.utils.sleep_until(ends_at - join_time)
-        channel = self.channels.voice_channel(timer.channel_id)
-        # If the bot is busy ringing in another channel, a ring a few seconds late
-        # is better than none, so it waits past the end for its turn.
-        async with self.speaker.joined(channel, by=ends_at + join_time) as voice:
-            await discord.utils.sleep_until(ends_at)
-            if voice is not None:
-                await voice.play(sound)
+        async with self._redrawing(timer, timer.ends_at):
+            await discord.utils.sleep_until(timer.ends_at)
+        timer.finish()
+        await self._wind_up(timer)
 
     @asynccontextmanager
     async def _redrawing(self, timer: UserTimer, deadline: datetime) -> AsyncIterator[None]:
@@ -327,7 +294,7 @@ class UserTimerService:
 
     async def _wind_up(self, timer: UserTimer) -> None:
         """Show a timer that has finished or stopped, without buttons, and free the channel for a new one."""
-        timer.stop_background_work()  # Leaves the current task alone, so a ring carries on.
+        timer.stop_background_work()  # Leaves the current task alone, so it can finish this.
         self._forget(timer)
         await self.refresh(timer)
 

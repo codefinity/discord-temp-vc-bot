@@ -9,13 +9,11 @@ authors = [
 requires-python = "==3.12.*"
 dependencies = [
     "aiohttp>=3.14.5",
-    # The "voice" extra installs PyNaCl and davey. The bot joins voice for a few
-    # seconds to play /timer's beeps and ring. Discord has required the DAVE voice
-    # encryption protocol since March 2026, and davey provides it. Support for DAVE
-    # arrived in discord.py 2.7.0, so don't go below this version. Sending sound also
-    # needs the Opus library, which isn't a Python package: see HOSTING.md.
+    # The "voice" extra installs PyNaCl and davey. The bot never joins voice, so it
+    # doesn't use them, but without them discord.py warns at every start that voice
+    # won't work, which looks like a fault in the logs.
     "discord-py[voice]>=2.7.1",
-    # Draws the circular countdowns. Its built-in scalable font means no font file
+    # Draws the circular countdown. Its built-in scalable font means no font file
     # has to be shipped with the bot.
     "pillow>=13.0.0",
     "python-dotenv>=1.2.4",
