@@ -152,13 +152,15 @@ The bot only runs while this terminal is open. For 24/7 running, see [HOSTING.md
 
 You can share this section with your server.
 
-**Getting a channel:** click **Create Your Own VC**. You'll be moved into your own channel, named after you, within a moment. You are its owner. If you already have a channel, clicking the hub takes you back to it, even if it's full or locked.
+**Getting a channel:** click **Create Your Own VC**. You'll be moved into your own channel within a moment. You are its owner. If you already have a channel, clicking the hub takes you back to it, even if it's full or locked.
+
+**Naming it:** the bot tags you in your channel's text chat with a **Name your channel** button. Click it, type a name and submit. **You have 2 minutes.** If the channel isn't named by then, it's deleted and everyone in it is disconnected. Renaming it from the control panel counts too.
 
 **Finding the controls:** open your channel's text chat using the chat icon on the voice channel. The bot tags you there, with a control panel. Anyone in the chat can see it, but only you can use it. Anyone else who clicks gets a private note: "Only the channel owner can do this."
 
 | Control | What it does |
 |---|---|
-| **Rename** | Opens a form for a new name, of 1 to 100 characters. Discord allows about 2 renames per 10 minutes on each channel. If you reach that limit, the bot tells you when to try again. |
+| **Rename** | Opens a form for a new name, of 1 to 100 characters. Discord allows about 2 renames per 10 minutes on each channel, and naming the channel counts as one. If you reach that limit, the bot tells you when to try again. |
 | **User limit** | Opens a form for a number from 0 to 99, where 0 means no limit. The number counts people only. If another bot, such as a music bot, joins, the bot adds a seat for it. |
 | **Locked / Unlocked** | Shows the current state, and switches it when clicked. While locked, new people can't join, but you can still get back in and people already inside stay. |
 | **Set timer length** | Choose 20, 25, 30, 35 or 40 minutes. The default is 20. You can only change this before the timer starts. |
@@ -195,14 +197,16 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 - [ ] Join the hub. You're moved into a new channel named after you, in the right category.
 - [ ] The bot doesn't join your channel. Only you are listed in it.
-- [ ] The control panel and a timer saying "Waiting for someone to join…", with a full grey ring, appear in the text chat.
+- [ ] The text chat shows, in order: the control panel, a message tagging you with a **Name your channel** button, and a timer saying "Waiting for someone to join…" with a full grey ring.
+- [ ] Click **Name your channel**. The form opens with an empty box and won't submit without a name. Submit one. The channel gets that name and the naming message disappears.
 - [ ] Join the hub again. You go back to the same channel, and no new one appears.
-- [ ] Have your friend join the hub. They get their own channel, the bot doesn't join it either, and their buttons work.
+- [ ] Have your friend join the hub. They get their own channel, the bot doesn't join it either, and their buttons work. Their **Name your channel** button gives you a private note if you click it.
+- [ ] **Unnamed channel:** create a channel and don't name it. After 2 minutes (12 seconds in fast mode) it's deleted, and the hub's chat tags you to say it wasn't named in time.
 
 **Controls**
 
 - [ ] **Rename:** rename the channel. The name changes.
-- [ ] **Rename limit:** rename it two more times quickly. The third rename tells you to try again later.
+- [ ] **Rename limit:** rename it once more quickly. Counting the name you gave it at the start, that's the third rename, and it tells you to try again later.
 - [ ] **Limit:** set a limit of 2. The channel shows 2 seats. You and one friend can join, and a third person can't.
 - [ ] **Limit:** type `abc`. You get a private error message.
 - [ ] **Lock:** click the lock button. The label changes to Locked. Your friend can't join from outside, but you can leave and come back through the hub.

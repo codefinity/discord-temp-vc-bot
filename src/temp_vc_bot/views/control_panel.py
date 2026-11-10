@@ -96,7 +96,7 @@ class ControlPanelView(OwnerOnlyView):
     async def rename_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         """Open the rename form."""
         channel = self.channels.require_channel(self.session)
-        await interaction.response.send_modal(RenameModal(self, channel.name))
+        await interaction.response.send_modal(RenameModal(self.channels, self.session, current_name=channel.name))
 
     @discord.ui.button(label=USER_LIMIT_LABEL, emoji="👥", style=discord.ButtonStyle.primary, row=0)
     async def limit_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:

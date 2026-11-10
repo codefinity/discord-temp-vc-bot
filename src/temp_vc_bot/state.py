@@ -21,6 +21,7 @@ from .constants import DEFAULT_TIMER_MINUTES, EXTENSION_MINUTES, NO_USER_LIMIT, 
 
 if TYPE_CHECKING:
     from .views.control_panel import ControlPanelView
+    from .views.name_prompt import NamePromptView
 
 
 class TimerPhase(Enum):
@@ -60,6 +61,11 @@ class TempVCSession:
     # Until then the channel is empty because it is new, not because everyone left.
     setup_finished: bool = False
     closed: bool = False
+    # Set once the owner names the channel, from the naming prompt or the panel.
+    named: asyncio.Event = field(default_factory=asyncio.Event)
+    # Deletes the channel if it isn't named in time.
+    naming_task: asyncio.Task[None] | None = None
+    name_prompt: NamePromptView | None = None
 
     @property
     def timer_started(self) -> bool:
@@ -88,13 +94,14 @@ class TempVCSession:
         self.ends_at += minutes_to_delta(EXTENSION_MINUTES)
 
     def stop_background_work(self) -> None:
-        """Cancel the timer and its reposts, and stop listening for button clicks on the panel."""
-        for task in (self.timer_task, self.repost_task):
+        """Cancel the timer, its reposts and the naming deadline, and stop listening for clicks."""
+        for task in (self.timer_task, self.repost_task, self.naming_task):
             # A task must not cancel itself, or it would stop before deleting the channel.
             if task is not None and task is not asyncio.current_task():
                 task.cancel()
-        if self.panel_view is not None:
-            self.panel_view.stop()
+        for view in (self.panel_view, self.name_prompt):
+            if view is not None:
+                view.stop()
 
 
 class SessionRegistry:

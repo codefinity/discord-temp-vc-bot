@@ -34,6 +34,7 @@ class VoiceEvents(commands.Cog):
         self.sessions = bot.sessions
         self.channels = bot.channel_manager
         self.timers = bot.timer_service
+        self.naming = bot.naming_service
         # Handles hub joins one at a time. Otherwise someone double-clicking the hub
         # could get two channels, because creating a channel takes a moment.
         self._hub_lock = asyncio.Lock()
@@ -179,7 +180,7 @@ class VoiceEvents(commands.Cog):
             session = await self.channels.create_session(member)
         except API_ERRORS as error:
             log.error("Could not create a temp VC for member %s: %s", member.id, error)
-            await self.channels.notify_in_hub(member, friendly_error(error))
+            await self.channels.notify_in_hub(member.id, friendly_error(error))
             return None
 
         if await self.channels.move_member(member, session):
@@ -190,10 +191,12 @@ class VoiceEvents(commands.Cog):
         return None
 
     async def _finish_setup(self, owner: discord.Member, session: TempVCSession) -> None:
-        """Post the controls and timer.
+        """Post the controls, then ask the owner to name the channel, then post the timer.
 
-        The bot never joins the voice channel itself. It manages the channel through
-        its permissions, so it doesn't show up in the channel or take a seat.
+        The naming prompt sits just above the timer. The timer is still the last
+        message, so it doesn't have to move below the prompt. The bot never joins the
+        voice channel itself. It manages the channel through its permissions, so it
+        doesn't show up in the channel or take a seat.
         """
         channel = self.channels.get_channel(session)
         if channel is None or session.closed:
@@ -203,12 +206,13 @@ class VoiceEvents(commands.Cog):
         session.panel_view = panel
         try:
             await panel.post(channel)
+            await self.naming.ask(session, channel)
             await self.timers.post_timer_message(session, channel)
         except API_ERRORS as error:
             if session.closed:
                 return  # The owner left straight away, so there is nothing to report.
             log.error("Could not post the controls in channel %s: %s", channel.id, error)
-            await self.channels.notify_in_hub(owner, friendly_error(error))
+            await self.channels.notify_in_hub(owner.id, friendly_error(error))
         session.setup_finished = True
 
         # Someone may have joined while those messages were being sent.

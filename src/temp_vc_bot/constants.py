@@ -15,6 +15,8 @@ TIMER_STEP_MINUTES = 5  # Gap between the dropdown choices.
 DEFAULT_TIMER_MINUTES = 20  # Used when the owner does not pick a length.
 EXTENSION_MINUTES = 10  # Added when the owner answers "Yes".
 ANSWER_WINDOW_MINUTES = 2  # How long the owner has to answer the prompt.
+# How long the owner has to name a new channel. If they don't, it's deleted.
+NAME_DEADLINE_MINUTES = 2
 # How often the countdown ring is redrawn. Every redraw is a new picture, and
 # Discord shows a blurred preview of each new picture until it has loaded. Once
 # a minute keeps those moments rare, and matches when the minutes in the middle
@@ -66,12 +68,15 @@ DELETE_ATTEMPTS = 3  # Tries at deleting a channel while being rate limited.
 # ---------------------------------------------------------------------------
 # Channel naming
 # ---------------------------------------------------------------------------
+# The name a channel has until its owner names it.
 CHANNEL_NAME_TEMPLATE = "{name}'s VC"
 
 # ---------------------------------------------------------------------------
 # Button and dropdown labels
 # ---------------------------------------------------------------------------
 RENAME_LABEL = "Rename"
+NAME_BUTTON_LABEL = "Name your channel"
+NAME_FORM_TITLE = "Name your channel"
 USER_LIMIT_LABEL = "User limit"
 # The lock button's label shows the current state, as the brief asks. It also
 # says what a click does, so nobody mistakes "Locked" for the action.
@@ -88,6 +93,13 @@ END_CANCEL_LABEL = "Keep it open"
 # Messages shown to people
 # ---------------------------------------------------------------------------
 NOT_OWNER_MESSAGE = "Only the channel owner can do this."
+NAME_PROMPT_MESSAGE = (
+    "{mention} please name your channel. If it isn't named within {minutes} minutes ({deadline}), it will be deleted."
+)
+# Posted in the hub, after the owner's tag.
+UNNAMED_CLOSED_MESSAGE = (
+    "your channel was deleted because it wasn't named in time. Join the hub to get a new one, then name it."
+)
 WAITING_MESSAGE = "Waiting for someone to join…"
 EXTEND_QUESTION = f"Time's up! Extend by {EXTENSION_MINUTES} minutes?"
 END_QUESTION = "End the discussion now? This channel will be deleted and everyone in it disconnected."

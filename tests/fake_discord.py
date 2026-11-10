@@ -11,6 +11,9 @@ Discord's documentation:
 - A locked or full channel refuses people, unless they have Move Members.
 - Moving someone who isn't in voice fails.
 - A channel can be renamed about twice per 10 minutes, then Discord answers 429.
+- New channels in a server are counted over 24 hours, from the first one. The reply
+  to each creation says how many are left and when the count resets. Discord doesn't
+  publish the number, so tests choose it.
 - Uploading a file needs Attach Files. An edit's attachment list replaces the
   message's attachments: old ones not listed are removed.
 - Every new message is reported over the gateway, the bot's own included. The
@@ -61,6 +64,7 @@ TEXT_INPUT = 4
 TOKEN = "fake-token"
 RENAMES_ALLOWED = 2
 RENAME_RETRY_AFTER_SECONDS = 540.0
+CREATION_WINDOW_SECONDS = 24 * 60 * 60
 
 EPHEMERAL_FLAG = 64
 
@@ -142,6 +146,9 @@ class FakeDiscord:
         self.report_exhausted_rename_bucket = False
         self.refuse_to_move: set[int] = set()  # Member IDs whose moves fail.
         self.channel_create_delay = 0.0  # Seconds, for testing what happens during creation.
+        # How many channels may be created per 24 hours. None leaves out the headers.
+        self.channel_creations_per_day: int | None = None
+        self.creation_times: list[float] = []
         self._ids = itertools.count(5000)
         self._sequence = itertools.count(1)
         self._ws: web.WebSocketResponse | None = None
@@ -658,6 +665,10 @@ class FakeDiscord:
             refusal = self._forbidden_overwrite(int(overwrite["allow"]), int(overwrite["deny"]))
             if refusal:
                 return refusal
+        headers: dict[str, str] = {}
+        limited = self._check_creation_limit(headers)
+        if limited:
+            return limited
         parent_id = int(body["parent_id"]) if body.get("parent_id") else None
         # With no overwrites given, a new channel copies its category's (they are "synced").
         inherited = self.channels[parent_id]["permission_overwrites"] if parent_id else []
@@ -665,7 +676,32 @@ class FakeDiscord:
         channel_id = self.add_channel(body["name"], parent_id=parent_id, overwrites=overwrites)
         channel = self.channels[channel_id]
         await self._dispatch("CHANNEL_CREATE", channel)
-        return _json(channel)
+        return _json(channel, headers=headers)
+
+    def _check_creation_limit(self, headers: dict[str, str]) -> web.Response | None:
+        """Count new channels over 24 hours, and report the count the way Discord does."""
+        allowed = self.channel_creations_per_day
+        if allowed is None:
+            return None
+        now = time.monotonic()
+        window_start = self.creation_times[0] if self.creation_times else now
+        reset_after = CREATION_WINDOW_SECONDS - (now - window_start)
+        if len(self.creation_times) >= allowed:
+            return _json(
+                {"message": "You are being rate limited.", "retry_after": reset_after, "global": False},
+                status=429,
+                headers={"Via": "1.1 google", "Retry-After": str(int(reset_after))},
+            )
+        self.creation_times.append(now)
+        headers.update(
+            {
+                "X-RateLimit-Limit": str(allowed),
+                "X-RateLimit-Remaining": str(allowed - len(self.creation_times)),
+                "X-RateLimit-Reset-After": f"{reset_after:.3f}",
+                "X-RateLimit-Bucket": "channel-create-bucket",
+            }
+        )
+        return None
 
     async def _edit_member(self, request: web.Request, body: dict[str, Any]) -> web.Response:
         member_id = int(request.match_info["member_id"])

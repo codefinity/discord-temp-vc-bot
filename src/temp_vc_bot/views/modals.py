@@ -20,6 +20,8 @@ from ..constants import (
 from ..errors import describe_wait, report_interaction_error
 
 if TYPE_CHECKING:
+    from ..services.channel_manager import ChannelManager
+    from ..state import TempVCSession
     from .control_panel import ControlPanelView
 
 
@@ -33,17 +35,27 @@ def parse_user_limit(text: str) -> int | None:
 
 
 class RenameModal(discord.ui.Modal, title="Rename your channel"):
-    """Asks the owner for a new channel name."""
+    """Asks the owner for a new channel name. The control panel and the naming prompt both use it."""
 
     new_name = discord.ui.TextInput(
         label="New channel name",
+        required=True,
         min_length=MIN_CHANNEL_NAME_LENGTH,
         max_length=MAX_CHANNEL_NAME_LENGTH,
     )
 
-    def __init__(self, panel: ControlPanelView, current_name: str) -> None:
-        super().__init__(timeout=MODAL_TIMEOUT_SECONDS)
-        self.panel = panel
+    def __init__(
+        self,
+        channels: ChannelManager,
+        session: TempVCSession,
+        *,
+        current_name: str | None = None,
+        title: str = discord.utils.MISSING,
+    ) -> None:
+        """With no `current_name`, the box starts empty, so the owner must type a name."""
+        super().__init__(title=title, timeout=MODAL_TIMEOUT_SECONDS)
+        self.channels = channels
+        self.session = session
         self.new_name.default = current_name
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
@@ -61,7 +73,7 @@ class RenameModal(discord.ui.Modal, title="Rename your channel"):
     async def _rename(self, name: str) -> str:
         """Try the rename, and return the message to show the owner."""
         try:
-            await self.panel.channels.rename(self.panel.session, name)
+            await self.channels.rename(self.session, name)
         except discord.RateLimited as error:
             return RENAME_LIMIT_MESSAGE.format(wait=describe_wait(error.retry_after))
         except discord.HTTPException as error:
