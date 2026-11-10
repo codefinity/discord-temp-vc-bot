@@ -10,6 +10,7 @@ from .config import Settings
 from .constants import MAX_RATE_LIMIT_WAIT_SECONDS
 from .errors import API_ERRORS
 from .services.channel_manager import ChannelManager
+from .services.chat_reminder import ChatReminder
 from .services.naming import NamingService
 from .services.session_setup import SessionSetup
 from .services.timer import TimerService
@@ -58,6 +59,7 @@ class TempVCBot(commands.Bot):
         self.naming_service = NamingService(self.channel_manager)
         self.session_setup = SessionSetup(self.channel_manager, self.timer_service, self.naming_service)
         self.topic_service = TopicService(self.channel_manager, self.session_setup)
+        self.chat_reminder = ChatReminder()
 
     async def setup_hook(self) -> None:
         """Runs once before the bot connects. Loads the event handlers and /topic."""
@@ -81,6 +83,10 @@ class TempVCBot(commands.Bot):
             )
             return
         log.info("Registered %s in the server.", ", ".join(f"/{command.name}" for command in commands_sent))
+        # Replies show /topic as a mention, which people can click to fill in the command.
+        topic_command = next((command for command in commands_sent if command.name == "topic"), None)
+        if topic_command is not None:
+            self.chat_reminder.command_mention = topic_command.mention
 
     async def on_message(self, message: discord.Message, /) -> None:
         """Skip discord.py's search for a text command in every message.

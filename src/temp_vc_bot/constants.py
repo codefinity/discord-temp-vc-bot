@@ -198,3 +198,8 @@ TOPIC_CHANNEL_DESCRIPTION = (
     "**I'm interested** is pinged with a link when you click **Create a VC**. "
     "⚠️ Please don't write anything else in this channel."
 )
+# The reply to anyone who chats in the topic channel. {command} becomes a clickable /topic.
+TOPIC_CHAT_REPLY_MESSAGE = "This channel is only for {command}. Type it to start a topic, and please don't chat here."
+# How long that reply stays before the bot deletes it, in seconds. While it's showing,
+# the same person's next messages don't get another one.
+TOPIC_CHAT_REPLY_SECONDS = 30

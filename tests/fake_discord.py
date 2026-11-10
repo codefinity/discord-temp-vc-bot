@@ -965,6 +965,9 @@ class FakeDiscord:
             "type": 0,
             "flags": body.get("flags", 0),
             "allowed_mentions_sent": body.get("allowed_mentions"),
+            # Kept under its own name: discord.py would read "message_reference" as the
+            # message being replied to, and fail on the None most messages have.
+            "message_reference_sent": body.get("message_reference"),
         }
 
     async def _create_message(self, request: web.Request, body: dict[str, Any]) -> web.Response:

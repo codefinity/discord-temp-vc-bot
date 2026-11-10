@@ -180,6 +180,9 @@ The brief left these open. Each one is easy to change.
 - Topics live in memory, like sessions. After a restart, buttons on cards posted before it stop working, and members start a new topic.
 - The topic channel's own topic, the line Discord shows at the top of a channel, explains `/topic` and asks people not to write anything else there (`TOPIC_CHANNEL_DESCRIPTION`). This can't be a private message to each person who opens the channel: Discord doesn't tell bots when someone opens a channel, and a bot can only show a message to one person as a reply to something that person clicked or typed. The topic line is shown to everyone, but it isn't a message in the chat.
 - The bot sets the channel's topic on every start, but only if it's different, because Discord allows only a few channel edits every 10 minutes. A change made by hand in Discord is undone at the next start, so change the text in `constants.py` instead. It only asks: everyone can still post, and the bot deletes nobody's messages.
+- Anyone who posts in the topic channel gets a reply that pings them and says the channel is only for `/topic` (`TOPIC_CHAT_REPLY_MESSAGE`). Admins do too. Bots, Discord's own notices such as "pinned a message", and messages in the channel's threads don't. A reply can't be private: only answers to a slash command, button or form can be. Everyone in the channel sees it, so the bot deletes it after 30 seconds (`TOPIC_CHAT_REPLY_SECONDS`).
+- While someone's reply is showing, their next messages don't get another one, so posting ten messages in a row doesn't bring ten replies.
+- The bot can't see what people write, because that needs the privileged Message Content intent, so every message gets the same reply. The reply shows `/topic` as a command mention, which people can click to fill in the command. The bot gets the command's ID when it registers it. If registering failed, the reply shows plain `/topic` text.
 
 **Restarts**
 

@@ -1,4 +1,4 @@
-"""The /topic command, which starts a topic in the topic channel."""
+"""The /topic command, which starts a topic in the topic channel, and replies to chat there."""
 
 from __future__ import annotations
 
@@ -17,16 +17,23 @@ if TYPE_CHECKING:
 
 
 class Topics(commands.Cog):
-    """Holds the /topic command."""
+    """Holds the /topic command, and points anyone chatting in the topic channel to it."""
 
     def __init__(self, bot: TempVCBot) -> None:
         self.settings = bot.settings
         self.topics = bot.topic_service
+        self.reminder = bot.chat_reminder
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         """Make sure the topic channel's topic explains /topic. This can run more than once."""
         await self.topics.describe_channel()
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Reply to anyone who chats in the topic channel, telling them to use /topic instead."""
+        if message.channel.id == self.settings.topic_channel_id:
+            await self.reminder.reply_to(message)
 
     @app_commands.command(name="topic", description=TOPIC_COMMAND_DESCRIPTION)
     @app_commands.guild_only()
