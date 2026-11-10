@@ -203,3 +203,36 @@ TOPIC_CHAT_REPLY_MESSAGE = "This channel is only for {command}. Type it to start
 # How long that reply stays before the bot deletes it, in seconds. While it's showing,
 # the same person's next messages don't get another one.
 TOPIC_CHAT_REPLY_SECONDS = 30
+
+# ---------------------------------------------------------------------------
+# /timer, in a temp VC's chat
+# ---------------------------------------------------------------------------
+# These minutes follow SECONDS_PER_MINUTE, like the channel's own timer.
+MIN_USER_TIMER_MINUTES = 1
+MAX_USER_TIMER_MINUTES = 60
+# How often a running /timer's ring is redrawn, in timer seconds. The time in the
+# middle goes down in steps of this size, and is exact at each step. Every redraw
+# is a new picture, with Discord's blurred preview for a moment, so a smaller step
+# looks smoother but blurs more often. Discord allows about 5 edits per 5 seconds.
+USER_TIMER_REDRAW_SECONDS = 10
+# Before a /timer starts or carries on, it shows 3, 2, 1 and beeps on each number.
+COUNT_IN_FROM = 3
+COUNT_IN_BEAT_SECONDS = 1.0  # The gap between those numbers, in real seconds.
+RING_SECONDS = 3  # How long the bot rings when a /timer reaches zero, in real seconds.
+# The bot joins the voice channel only to beep or ring, and leaves straight after.
+# Joining takes a second or two, and if the bot is making a sound in another channel,
+# it waits its turn: Discord allows a bot in one voice channel per server. This is
+# the longest it waits, in real seconds. After that the timer carries on silently.
+# It starts joining this long before a /timer ends, so the ring isn't late.
+SOUND_JOIN_SECONDS = 5
+
+TIMER_COMMAND_DESCRIPTION = "Show a countdown in this voice channel's chat, with a beep to start and a ring at the end."
+TIMER_MINUTES_DESCRIPTION = f"How long it runs, from {MIN_USER_TIMER_MINUTES} to {MAX_USER_TIMER_MINUTES} minutes"
+START_LABEL = "Start"
+PAUSE_LABEL = "Pause"
+STOP_LABEL = "Stop"
+TIMER_NOT_TEMP_VC_MESSAGE = "/timer only works in the chat of a temporary voice channel."
+TIMER_JOIN_VOICE_MESSAGE = "Join this voice channel to use its timer."
+TIMER_EXISTS_MESSAGE = "This channel already has a timer. Click its **Stop** button before setting another."
+TIMER_POSTED_MESSAGE = "⏱️ Your timer is below. Anyone in this voice channel can start, pause or stop it."
+TIMER_FOOTER = "Anyone in this voice channel can use these buttons."

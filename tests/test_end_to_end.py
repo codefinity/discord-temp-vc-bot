@@ -206,7 +206,8 @@ class TestBotsRole:
         _, channel_id = await make_vc(world)
         assert int(world.overwrite_on(channel_id, BOT_USER_ID)["allow"]) & MANAGE_ROLES
 
-    async def test_bot_never_joins_voice(self, world: FakeDiscord, bot: TempVCBot) -> None:
+    async def test_bot_doesnt_join_voice_to_manage_a_channel(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        # It only joins for a moment to play a /timer's sounds. See test_user_timer.
         _, channel_id = await make_vc(world)
         assert BOT_USER_ID not in world.voice
         assert BOT_USER_ID not in world.people_in(channel_id)

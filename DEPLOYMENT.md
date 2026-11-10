@@ -34,6 +34,9 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
    uv --version
    ```
    You should see a version number.
+5. **Mac or Linux only:** install Opus, which the bot uses to play **/timer**'s beeps and ring. Windows already has what it needs. Without it, everything else works and /timer is silent.
+   - **Ubuntu or Debian:** `sudo apt install libopus0`
+   - **Mac:** install [Homebrew](https://brew.sh) if you don't have it, then run `brew install opus`
 
 ## Step 2: Create the bot in Discord
 
@@ -56,30 +59,33 @@ uv is the tool that installs and runs the bot. It also downloads the right versi
 
 1. Copy this link into a text editor, and replace `YOUR_APPLICATION_ID` with the ID from Step 2:
    ```
-   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=281475397241872&scope=bot+applications.commands
+   https://discord.com/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=281475399339024&scope=bot+applications.commands
    ```
 2. Open the edited link in your browser.
 3. Choose your server and click **Continue**.
 4. Keep every permission ticked, then click **Authorize**.
 
-The end of the link, `scope=bot+applications.commands`, adds the bot to your server and lets it add its **/topic** command. The number in the link, `281475397241872`, stands for exactly these ten permissions:
+The end of the link, `scope=bot+applications.commands`, adds the bot to your server and lets it add its **/topic** and **/timer** commands. The number in the link, `281475399339024`, stands for exactly these eleven permissions:
 
 | Permission | Why the bot needs it |
 |---|---|
 | **View Channels** | To see the hub, the category, the temporary channels and the topic channel. |
 | **Manage Channels** | To create, rename, set limits on and delete temporary channels, and to set the topic of #find-your-group to a short guide to /topic. |
 | **Manage Roles** | To control who can connect, which is how Lock works. On a channel, Discord calls this same permission "Manage Permissions". The bot never edits your server's roles. |
-| **Connect** | The bot never joins voice, but Discord won't let anyone edit a voice channel they can't connect to. Without this, the bot couldn't manage a locked channel. |
+| **Connect** | To join a channel for a few seconds to play **/timer**'s beeps and ring. Discord also won't let anyone edit a voice channel they can't connect to, so without this the bot couldn't manage a locked channel. |
+| **Speak** | To play **/timer**'s beeps and ring. |
 | **Move Members** | To move people from the hub into their channel. |
 | **Send Messages** | To post the control panel, timer and extension question, and topic cards and invites. |
 | **Embed Links** | To show the control panel, timer and topic cards as embeds. |
 | **Attach Files** | To show the circular countdown, which is a picture attached to the timer. |
 | **Manage Nicknames** | To put a 👑 in front of a channel owner's name while they own the channel. The bot only changes owners' nicknames, and gives the old one back when the channel closes. |
-| **Set Voice Channel Status** | To set the status an owner types, the line Discord shows under a voice channel's name. Because the bot doesn't join the channel, Discord also needs it to have Manage Channels there, which it does. |
+| **Set Voice Channel Status** | To set the status an owner types, the line Discord shows under a voice channel's name. Because the bot usually isn't in the channel, Discord also needs it to have Manage Channels there, which it does. |
 
 **Invited the bot before the circular countdown, the crown or the channel status was added?** Open the new link once more to add Attach Files, Manage Nicknames and Set Voice Channel Status. You don't need to remove the bot first. Until you do, everything else still works: owners still have to type a status, and are told the bot couldn't set it, but the name counts and the channel isn't deleted.
 
-**Invited the bot before /topic was added?** Open the new link once more, so the bot can add the command. You don't need to remove the bot first. Until you do, the startup log says `Could not register /topic`, and everything else still works.
+**Invited the bot before /topic was added?** Open the new link once more, so the bot can add its commands. You don't need to remove the bot first. Until you do, the startup log says `Could not register /topic and /timer`, and everything else still works.
+
+**Invited the bot before /timer was added?** Open the new link once more to add Speak. Most servers give everyone Speak anyway, so /timer may already beep. If it doesn't, the startup log says `The bot is missing Speak`.
 
 **For the crown, put the bot's role high in the list.** Discord only lets the bot change the nickname of members whose highest role is below the bot's role, and never the server owner's. In **Server Settings**, then **Roles**, drag the bot's role above the roles your members have. Anyone above it still gets a channel, just without the crown.
 
@@ -200,6 +206,20 @@ You can share this section with your server.
 
 You can also click **Create a VC** on your private card, to open a channel without advertising first. The channel works like any other: you're its owner, with the control panel, the timer and the crown, but there's no naming step, because it already has a name. If nobody joins within 5 minutes, it's deleted. A card nobody clicks for an hour closes. You can own one channel at a time, so end the one you have before creating another.
 
+**A timer for your group with /timer:** in your channel's text chat, type `/timer` followed by a number of minutes from 1 to 60, such as `/timer 25`. Anyone in the voice channel can do this and use its buttons. Anyone else gets a private note.
+
+| Button | What it does |
+|---|---|
+| **Start** | Counts down 3, 2, 1 with a beep on each, then starts with a higher beep. The bot joins the channel for those few seconds, then leaves. After a pause, it counts in again and carries on from where it stopped. |
+| **Pause** | Holds the time left. It works during the 3, 2, 1 too. |
+| **Stop** | Ends the timer without a ring. Its buttons go, and the channel can have a new one. |
+
+- The ring empties as time passes, with the minutes and seconds left in the middle. It updates every 10 seconds, and the text above it shows when the timer ends.
+- When time is up, the bot rings for 3 seconds. It joins a few seconds early so the ring is on time, and leaves straight after.
+- A channel has one timer at a time. To set a different one, click **Stop** first.
+- This timer is only for you and your group. It doesn't change when your channel closes. If the channel closes first, the timer goes with it.
+- The bot can only be in one voice channel at a time. If it's beeping in another channel, yours waits up to 5 seconds, then carries on silently.
+
 ## Test checklist
 
 You need a friend or a second account for this. Keep the terminal open, so you can see any errors.
@@ -208,7 +228,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 
 1. Open `src/temp_vc_bot/constants.py` in a text editor.
 2. Change `SECONDS_PER_MINUTE = 60` to `SECONDS_PER_MINUTE = 6`, and save.
-3. Restart the bot. Everything now runs ten times faster: the 20-minute timer takes 2 minutes, the 2-minute answer window takes 12 seconds, the extra 10 minutes take 1 minute, and a /topic channel nobody joins is deleted after 30 seconds. The messages and the ring still say the normal numbers.
+3. Restart the bot. Everything now runs ten times faster: the 20-minute timer takes 2 minutes, the 2-minute answer window takes 12 seconds, the extra 10 minutes take 1 minute, a /topic channel nobody joins is deleted after 30 seconds, and a 1-minute /timer takes 6 seconds. The messages and the rings still say the normal numbers. A /timer's 3, 2, 1 and its ring keep their real length.
 4. **Change it back to 60 when you've finished, and restart the bot.**
 
 **Creating a channel**
@@ -263,6 +283,18 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 - [ ] **Create:** while you're in a voice channel, click **Create a VC**. A channel appears with your name and status, you're moved in and get the crown, and the chat has the control panel and timer but no naming message. In #find-your-group, a message tags your friend with a link. The card shows the channel and loses its buttons. Your friend clicks the link and joins, and the timer starts.
 - [ ] **Nobody joins:** leave voice, start another topic, and click **Create a VC** on the private card. You're told it will be deleted if nobody joins. Don't join. After 5 minutes (30 seconds in fast mode) it's deleted.
 
+**/timer**
+
+- [ ] **Wrong place:** type `/timer 1` in #find-your-group. Only you see a note saying it only works in a temporary channel's chat.
+- [ ] **Post:** in your channel's chat, type `/timer 1`. Only you see a note that it's posted. Below it, a "1-minute timer" shows a full ring with 1:00, and the buttons Start, Pause and Stop. Pause is greyed out.
+- [ ] **One at a time:** type `/timer 2` straight away. Only you see a note that the channel already has one.
+- [ ] **Count-in:** click **Start**. The bot appears in your channel for a few seconds. You hear three beeps a second apart as the ring shows 3, 2, 1, then a higher beep as it starts. The bot leaves, and the ring starts emptying.
+- [ ] **Not in the channel:** have your friend click **Pause** while they're not in your voice channel. They get a private note, and the timer keeps going.
+- [ ] **Pause:** have your friend join your channel and click **Pause**. The ring stops and says "paused". Click **Start**: it counts in again with beeps, and carries on from where it stopped.
+- [ ] **Time's up:** wait for the end. The ring shows 0:00 and "time's up", its buttons go, and the bot joins and rings for 3 seconds, then leaves.
+- [ ] **Stop:** type `/timer 5`, click **Start**, then **Stop**. The timer says "Stopped.", its buttons go, and there's no ring. Type `/timer 5` again, and it works.
+- [ ] **Two channels:** while your friend has their own channel, both click **Start** at about the same time. Both get the beeps, one after the other.
+
 **Cleanup**
 
 - [ ] **Empty channel:** create a channel and leave it. It's deleted right away.
@@ -293,18 +325,29 @@ Check the terminal for these messages:
 
 If there's no message at all, make sure you restarted the bot after editing `.env`.
 
-### /topic doesn't appear, or doesn't work
+### /topic or /timer doesn't appear, or doesn't work
 
 | What you see | Fix |
 |---|---|
-| `/topic` isn't in the list when you type `/`, and the log says `Could not register /topic` | Open the invite link from Step 3 again. It includes `applications.commands`, which lets the bot add commands. Then restart the bot. |
-| `/topic` isn't in the list, and the log has no error | Discord can take a moment to show new commands. Press **Ctrl+R** (**Cmd+R** on a Mac) to reload Discord. |
+| `/topic` or `/timer` isn't in the list when you type `/`, and the log says `Could not register /topic and /timer` | Open the invite link from Step 3 again. It includes `applications.commands`, which lets the bot add commands. Then restart the bot. |
+| `/topic` or `/timer` isn't in the list, and the log has no error | Discord can take a moment to show new commands. Press **Ctrl+R** (**Cmd+R** on a Mac) to reload Discord. |
 | The log says `TOPIC_CHANNEL_ID ... is not a text channel` | That ID is wrong. Copy the find-your-group channel's ID again. |
 | `/topic` says it only works in another channel | You're in a different channel from the one in `TOPIC_CHANNEL_ID`, or that ID is wrong. |
 | **Advertise** says the bot doesn't have permission | The bot can't post in the topic channel. The startup log names what's missing. Check the channel's **Permissions** for anything that denies the bot's role. |
 | The line at the top of #find-your-group doesn't explain /topic | The bot can't edit the channel. The log says `Could not set the topic channel's topic`, and the startup log names the missing permission. Check the channel's **Permissions** for anything that denies Manage Channels to the bot's role, then restart the bot. |
 | Nobody gets a reply when they post in #find-your-group | The bot can't post there. The log says `Could not reply to a message in the topic channel`. Check the channel's **Permissions** for anything that denies Send Messages to the bot's role. |
 | You changed #find-your-group's topic, and it changed back | The bot sets it on every start. To change the wording, edit `TOPIC_CHANNEL_DESCRIPTION` in `src/temp_vc_bot/constants.py` and restart the bot. |
+
+### /timer doesn't beep or ring
+
+The timer still counts down, without sound. The log says why:
+
+| Log message | Cause | Fix |
+|---|---|---|
+| `The Opus library isn't installed` (at startup) | Opus is missing. The bot needs it to send sound. | Install it as in Step 1, or Step 1 of [HOSTING.md](HOSTING.md) on a server. Then restart the bot. |
+| `The bot is missing Speak` (at startup) | The bot was invited with a link from before /timer was added, and your server doesn't give everyone Speak. | Open the invite link from Step 3 again. |
+| `Could not join voice channel ... to play a sound` | The bot couldn't connect to voice. On a server, outgoing UDP may be blocked. If the message includes `RuntimeError`, a voice library is missing. | Check that the server's firewall allows outgoing UDP. For a `RuntimeError`, run `uv sync` again. |
+| `Skipped a sound, because the bot was still playing one in another channel` | Two timers needed the bot at the same moment, and it can only be in one voice channel. | Nothing to fix. The next count-in or ring works as normal. |
 
 ### Missing permissions
 

@@ -113,8 +113,9 @@ def _bot_overwrite(me: discord.Member) -> discord.PermissionOverwrite:
     """The permissions the bot gives itself on each temp VC."""
     overwrite = discord.PermissionOverwrite(
         view_channel=True,
-        # The bot never joins voice, but Discord won't let anyone edit a voice
-        # channel they can't connect to. This keeps a locked channel manageable.
+        # The bot joins only to play a /timer's beeps and ring. Discord also won't let
+        # anyone edit a voice channel they can't connect to, so this keeps a locked
+        # channel manageable.
         connect=True,
         manage_channels=True,
         move_members=True,
@@ -132,6 +133,10 @@ def _bot_overwrite(me: discord.Member) -> discord.PermissionOverwrite:
     # was added would lose its whole overwrite, and with it every new channel.
     if me.guild_permissions.set_voice_channel_status:
         overwrite.set_voice_channel_status = True
+    # For a /timer's beeps and ring, even in a category where members can't speak.
+    # Checked for the same reason as the status.
+    if me.guild_permissions.speak:
+        overwrite.speak = True
     return overwrite
 
 
@@ -156,8 +161,12 @@ class ChannelManager:
 
     def get_channel(self, session: TempVCSession) -> discord.VoiceChannel | None:
         """Find a session's voice channel, or None if it is gone."""
+        return self.voice_channel(session.channel_id)
+
+    def voice_channel(self, channel_id: int) -> discord.VoiceChannel | None:
+        """Find a voice channel by its ID, or None if it is gone."""
         guild = self.guild
-        channel = guild.get_channel(session.channel_id) if guild else None
+        channel = guild.get_channel(channel_id) if guild else None
         return channel if isinstance(channel, discord.VoiceChannel) else None
 
     @property
@@ -304,8 +313,13 @@ class ChannelManager:
             log.warning("Could not update the user limit of channel %s: %s", channel.id, error)
 
     async def _write_limit(self, channel: discord.VoiceChannel, requested_limit: int) -> int:
-        """Set a channel's limit, adding seats for bots. Returns how many people fit."""
-        bots_in_channel = sum(member.bot for member in channel.members)
+        """Set a channel's limit, adding seats for bots. Returns how many people fit.
+
+        This bot gets no seat. It only drops in for a few seconds to play a /timer's
+        sounds, and Move Members lets it into a full channel anyway.
+        """
+        me = channel.guild.me
+        bots_in_channel = sum(member.bot and member.id != me.id for member in channel.members)
         seats = seats_needed(requested_limit, bots_in_channel)
         if channel.user_limit != seats:
             await channel.edit(user_limit=seats, reason="Temp VC user limit")
@@ -451,6 +465,10 @@ class ChannelManager:
             log.warning(
                 "The bot is missing Set Voice Channel Status, so owners can't set a channel status. "
                 "Open the invite link again to add it."
+            )
+        if not guild.me.guild_permissions.speak:
+            log.warning(
+                "The bot is missing Speak, so /timer can't beep or ring. Open the invite link again to add it."
             )
 
         hub = guild.get_channel(self.settings.hub_channel_id)

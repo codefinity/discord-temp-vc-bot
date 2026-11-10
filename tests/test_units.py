@@ -10,15 +10,17 @@ import discord
 import pytest
 from PIL import Image
 
-from temp_vc_bot import constants, countdown_ring, main
+from temp_vc_bot import constants, countdown_ring, main, sounds
 from temp_vc_bot.bot import build_intents
 from temp_vc_bot.config import ConfigError, load_settings
 from temp_vc_bot.countdown_ring import render_ring
 from temp_vc_bot.errors import describe_wait, friendly_error
 from temp_vc_bot.services.channel_manager import seats_needed
 from temp_vc_bot.services.timer import redraw_times, ring_face
-from temp_vc_bot.state import SessionRegistry, TempVCSession, TimerPhase
+from temp_vc_bot.services.user_timer import clock, user_timer_face
+from temp_vc_bot.state import SessionRegistry, TempVCSession, TimerPhase, UserTimer, UserTimerPhase
 from temp_vc_bot.views.modals import parse_user_limit
+from temp_vc_bot.views.user_timer import UserTimerView
 
 from .fake_discord import INVITE_PERMISSIONS
 
@@ -229,6 +231,7 @@ class TestIntentsAndInvite:
             manage_channels=True,
             manage_roles=True,
             connect=True,
+            speak=True,
             move_members=True,
             send_messages=True,
             embed_links=True,
@@ -332,3 +335,143 @@ class TestMain:
         with pytest.raises(SystemExit) as caught:
             main.main()
         assert caught.value.code == main.EXIT_BAD_CONFIG
+
+
+class TestSounds:
+    """The beeps and the ring /timer plays. Discord voice takes 16-bit, 48 kHz stereo."""
+
+    def test_sounds_are_whole_20_millisecond_pieces(self) -> None:
+        # discord.py stops at a piece that's cut short, which would lose the end of a sound.
+        for sound in (sounds.count_in(3, 1.0), sounds.ring(3)):
+            assert len(sound) % sounds.FRAME_BYTES == 0
+
+    def test_count_in_beeps_on_each_number_then_once_more_to_start(self) -> None:
+        sound = sounds.count_in(3, 1.0)
+        # Three beeps a second apart, then the start beep, after the lead-in.
+        lead_in = sounds.LEAD_IN_SECONDS
+        assert sounds.duration(sound) == pytest.approx(lead_in + 3 + 0.4, abs=0.02)
+        for beep_at in (lead_in, lead_in + 1, lead_in + 2, lead_in + 3):
+            assert _loudness(sound, beep_at + 0.05) > 1000, f"Expected a beep at {beep_at}s."
+        for quiet_at in (lead_in + 0.5, lead_in + 1.5, lead_in + 2.5):
+            assert _loudness(sound, quiet_at) == 0, f"Expected silence at {quiet_at}s."
+
+    def test_ring_lasts_as_long_as_asked(self) -> None:
+        assert sounds.duration(sounds.ring(3)) == pytest.approx(3, abs=0.02)
+        assert _loudness(sounds.ring(3), 1.5) > 1000
+
+    def test_sounds_are_not_too_loud(self) -> None:
+        loudest = max(abs(sample) for sample in _samples(sounds.ring(3)))
+        assert loudest < 0.5 * 32767
+
+
+def _samples(pcm: bytes) -> memoryview:
+    return memoryview(pcm).cast("h")
+
+
+def _loudness(pcm: bytes, at_seconds: float) -> int:
+    """The loudest sample in the 10 ms from `at_seconds`."""
+    start = round(at_seconds * sounds.SAMPLE_RATE) * 2  # Two samples per moment, for stereo.
+    return max(abs(sample) for sample in _samples(pcm)[start : start + 960])
+
+
+class TestUserTimerClock:
+    def test_minutes_and_seconds_rounded_up(self) -> None:
+        assert clock(minutes(5)) == "5:00"
+        assert clock(minutes(4.5)) == "4:30"
+        assert clock(timedelta(seconds=59.2)) == "1:00", "It shows 0:00 only when time is up."
+        assert clock(timedelta(0)) == "0:00"
+
+    def test_a_hair_over_a_whole_second_isnt_rounded_up(self) -> None:
+        assert clock(timedelta(seconds=50.0000001)) == "0:50"
+
+
+def user_timer(minutes_long: int = 5) -> UserTimer:
+    return UserTimer(channel_id=1, set_by=2, minutes=minutes_long)
+
+
+class TestUserTimerFace:
+    def test_ready_shows_the_full_time(self) -> None:
+        assert user_timer_face(user_timer(), START) == (1.0, "5:00", "ready")
+
+    def test_count_in_shows_the_time_then_the_numbers(self) -> None:
+        timer = user_timer()
+        timer.count_in()
+        assert user_timer_face(timer, START) == (1.0, "5:00", "get ready")
+        timer.count = 3
+        assert user_timer_face(timer, START) == (1.0, "3", "get ready")
+
+    def test_running_empties_the_ring(self) -> None:
+        timer = user_timer()
+        timer.run(START)
+        assert user_timer_face(timer, START + minutes(1)) == (0.8, "4:00", "left")
+
+    def test_paused_and_finished(self) -> None:
+        timer = user_timer()
+        timer.run(START)
+        timer.pause(START + minutes(2.5))
+        assert user_timer_face(timer, START + minutes(10)) == (0.5, "2:30", "paused")
+        timer.finish()
+        assert user_timer_face(timer, START) == (0.0, "0:00", "time's up")
+
+
+class TestUserTimerState:
+    def test_pause_holds_the_time_left_and_carrying_on_counts_it_down(self) -> None:
+        timer = user_timer()
+        timer.run(START)
+        timer.pause(START + minutes(2))
+        assert (timer.phase, timer.remaining) == (UserTimerPhase.PAUSED, minutes(3))
+        later = START + minutes(60)
+        timer.run(later)
+        assert timer.ends_at == later + minutes(3)
+
+    def test_pausing_during_the_first_count_in_goes_back_to_ready(self) -> None:
+        timer = user_timer()
+        timer.count_in()
+        timer.pause(START)
+        assert (timer.phase, timer.remaining) == (UserTimerPhase.READY, timer.length)
+
+    def test_pausing_during_a_later_count_in_stays_paused(self) -> None:
+        timer = user_timer()
+        timer.run(START)
+        timer.pause(START + minutes(1))
+        timer.count_in()
+        timer.pause(START + minutes(30))  # The count-in doesn't use up any time.
+        assert (timer.phase, timer.remaining) == (UserTimerPhase.PAUSED, minutes(4))
+
+    def test_time_left_never_goes_above_what_was_left_when_it_started(self) -> None:
+        # asyncio can wake a few milliseconds before the moment the countdown began.
+        timer = user_timer()
+        timer.run(START)
+        assert timer.time_left(START - timedelta(milliseconds=8)) == timer.length
+
+    def test_stop_and_finish_are_over(self) -> None:
+        stopped, finished = user_timer(), user_timer()
+        stopped.run(START)
+        stopped.stop(START + minutes(1))
+        finished.finish()
+        assert stopped.over and finished.over
+        assert stopped.remaining == minutes(4)
+
+
+class TestUserTimerButtons:
+    @pytest.mark.parametrize(
+        ("phase", "start", "pause"),
+        [
+            (UserTimerPhase.READY, True, False),
+            (UserTimerPhase.COUNTING_IN, False, True),
+            (UserTimerPhase.RUNNING, False, True),
+            (UserTimerPhase.PAUSED, True, False),
+        ],
+    )
+    async def test_only_buttons_that_do_something_can_be_clicked(self, phase: UserTimerPhase, start: bool, pause: bool) -> None:
+        timer = user_timer()
+        timer.phase = phase
+        view = UserTimerView(None, timer)  # type: ignore[arg-type]
+        assert (not view.start_button.disabled, not view.pause_button.disabled, not view.stop_button.disabled) == (start, pause, True)
+
+
+class TestUserTimerRedrawTimes:
+    def test_ten_second_steps_counted_back_from_the_end(self) -> None:
+        step = timedelta(seconds=10)
+        deadline = START + timedelta(minutes=1)
+        assert redraw_times(deadline, START, step) == [deadline - n * step for n in range(5, 0, -1)]

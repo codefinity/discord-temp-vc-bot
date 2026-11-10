@@ -12,6 +12,7 @@ import yarl
 from temp_vc_bot import countdown_ring
 from temp_vc_bot.bot import TempVCBot
 from temp_vc_bot.config import Settings
+from temp_vc_bot.services import speaker
 
 from .fake_discord import CATEGORY_ID, GUILD_ID, HUB_ID, TOKEN, TOPIC_CHANNEL_ID, FakeDiscord, FakeVoiceClient
 
@@ -27,6 +28,9 @@ async def world(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FakeDiscord]:
     monkeypatch.setattr(discord.gateway.DiscordWebSocket, "DEFAULT_GATEWAY", yarl.URL(fake.gateway_url))
     # Use the real channel.connect() code, but skip the audio connection.
     monkeypatch.setitem(discord.abc.Connectable.connect.__kwdefaults__, "cls", FakeVoiceClient)
+    monkeypatch.setattr(FakeVoiceClient, "played", [])
+    # FakeVoiceClient needs no Opus, so the tests don't either, even on a server without it.
+    monkeypatch.setattr(speaker, "opus_loaded", lambda: True)
 
     # discord.py waits 5 seconds before logging in again, which would slow reconnect tests.
     async def no_login_delay(*args: object, **kwargs: object) -> None:

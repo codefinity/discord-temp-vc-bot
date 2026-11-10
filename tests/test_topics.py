@@ -93,7 +93,7 @@ def interested_count(message: dict[str, Any]) -> str:
 
 class TestTopicCommand:
     async def test_topic_is_registered_in_the_server(self, world: FakeDiscord, bot: TempVCBot) -> None:
-        assert [command["name"] for command in world.commands[GUILD_ID]] == ["topic"]
+        assert [command["name"] for command in world.commands[GUILD_ID]] == ["topic", "timer"]
 
     async def test_outside_the_topic_channel_only_the_user_is_told_where_to_use_it(self, world: FakeDiscord, bot: TempVCBot) -> None:
         member = world.add_member("Alice")
@@ -388,7 +388,7 @@ class TestTopicSetup:
         world.refuse_command_registration = True
         with caplog.at_level(logging.ERROR):
             await start_bot()
-        assert "Could not register /topic with Discord" in caplog.text
+        assert "Could not register /topic and /timer with Discord" in caplog.text
         owner = world.add_member("Alice")
         await world.join_voice(owner, HUB_ID)
         await world.settle()

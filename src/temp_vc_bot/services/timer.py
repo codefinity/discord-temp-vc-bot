@@ -8,7 +8,7 @@ import logging
 import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import discord
 
@@ -102,15 +102,16 @@ def ring_face(session: TempVCSession, now: datetime) -> tuple[float, str, str]:
     return minutes_left / length, str(math.ceil(minutes_left)), caption
 
 
-def redraw_times(deadline: datetime, now: datetime) -> list[datetime]:
+def redraw_times(deadline: datetime, now: datetime, step: timedelta | None = None) -> list[datetime]:
     """When to redraw the ring between `now` and `deadline`.
 
-    The times are counted back from the deadline in steps of RING_REDRAW_MINUTES,
-    rather than forward from now. That way each redraw lands exactly on a step,
-    so the minutes shown are exact at the moment the ring is drawn. The deadline
-    itself isn't included, because the phase change at that moment redraws anyway.
+    The times are counted back from the deadline in steps of `step` (by default
+    RING_REDRAW_MINUTES), rather than forward from now. That way each redraw lands
+    exactly on a step, so the time shown is exact at the moment the ring is drawn.
+    The deadline itself isn't included, because the phase change at that moment
+    redraws anyway.
     """
-    step = minutes_to_delta(RING_REDRAW_MINUTES)
+    step = step or minutes_to_delta(RING_REDRAW_MINUTES)
     steps_before_deadline = math.ceil((deadline - now) / step) - 1
     return [deadline - count * step for count in range(steps_before_deadline, 0, -1)]
 

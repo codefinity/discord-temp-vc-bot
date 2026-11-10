@@ -13,8 +13,10 @@ from .services.channel_manager import ChannelManager
 from .services.chat_reminder import ChatReminder
 from .services.naming import NamingService
 from .services.session_setup import SessionSetup
+from .services.speaker import Speaker
 from .services.timer import TimerService
 from .services.topics import TopicService
+from .services.user_timer import UserTimerService
 from .state import SessionRegistry
 
 log = logging.getLogger(__name__)
@@ -38,7 +40,7 @@ class TempVCBot(commands.Bot):
         # Without this, max_ratelimit_timeout below allows only one new channel per day.
         ratelimit_fix.apply()
         super().__init__(
-            # The bot has no text commands, only the /topic slash command. discord.py
+            # The bot has no text commands, only the /topic and /timer slash commands. discord.py
             # requires a prefix anyway, and this choice needs no message access.
             command_prefix=commands.when_mentioned,
             help_command=None,
@@ -60,24 +62,28 @@ class TempVCBot(commands.Bot):
         self.session_setup = SessionSetup(self.channel_manager, self.timer_service, self.naming_service)
         self.topic_service = TopicService(self.channel_manager, self.session_setup)
         self.chat_reminder = ChatReminder()
+        self.speaker = Speaker()
+        self.user_timer_service = UserTimerService(self.channel_manager, self.speaker)
 
     async def setup_hook(self) -> None:
-        """Runs once before the bot connects. Loads the event handlers and /topic."""
+        """Runs once before the bot connects. Loads the event handlers, /topic and /timer."""
         await self.load_extension("temp_vc_bot.cogs.voice_events")
         await self.load_extension("temp_vc_bot.cogs.topics")
+        await self.load_extension("temp_vc_bot.cogs.user_timer")
+        self.speaker.report_setup_problems()
         await self._register_commands()
 
     async def _register_commands(self) -> None:
-        """Send Discord the current list of slash commands, so /topic appears in the server.
+        """Send Discord the current list of slash commands, so /topic and /timer appear in the server.
 
         Sending the same list again changes nothing, so this is safe on every start.
         """
         try:
             commands_sent = await self.tree.sync(guild=discord.Object(self.settings.guild_id))
         except API_ERRORS as error:
-            # The bot still runs. Only /topic is missing until this works.
+            # The bot still runs. Only the slash commands are missing until this works.
             log.error(
-                "Could not register /topic with Discord: %s. Open the invite link in DEPLOYMENT.md "
+                "Could not register /topic and /timer with Discord: %s. Open the invite link in DEPLOYMENT.md "
                 "again so the bot can add commands, and check GUILD_ID.",
                 error,
             )

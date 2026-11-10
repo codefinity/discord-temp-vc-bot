@@ -2,9 +2,11 @@
 
 A Discord bot that gives each member their own voice channel on a timer.
 
-A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to give the channel a name and a status: if they don't within 2 minutes, the channel is deleted. While they own it, the owner has a 👑 in front of their name. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot never joins a voice channel itself. It manages each one through its permissions.
+A member joins the **Create Your Own VC** voice channel (the "hub"). The bot then creates a voice channel for them, moves them in, and posts a control panel in that channel's text chat. It also asks the owner to give the channel a name and a status: if they don't within 2 minutes, the channel is deleted. While they own it, the owner has a 👑 in front of their name. Once someone else joins, a countdown starts. When time runs out, the owner can extend once, and then the channel is deleted. If everyone leaves first, it's deleted right away. The owner can also end it early from the control panel. The bot manages each channel through its permissions. It only joins one for a few seconds, to play a /timer's beeps and ring.
 
 Members can also find a group first. In the topic channel, such as **#find-your-group**, **/topic** asks for a channel name, a status and what they want to discuss, and shows them a card only they can see. **Advertise** posts the card for everyone, and others click **I'm interested**. When the member clicks **Create a VC**, the bot creates the channel and pings everyone who's interested with a link to join it.
+
+In a temp VC's chat, anyone in the channel can type **/timer 25** for a 25-minute countdown with **Start**, **Pause** and **Stop** buttons. Start counts down 3, 2, 1 with a beep on each, and the bot rings for 3 seconds when time is up. It's only for the people in the channel, and doesn't change when the channel closes.
 
 - **To set it up:** follow [DEPLOYMENT.md](DEPLOYMENT.md). It's written for non-developers.
 - **To keep it running 24/7:** follow [HOSTING.md](HOSTING.md).
@@ -28,16 +30,20 @@ temp-vc-bot/
 │   ├── state.py                One channel's session, and the list of sessions
 │   ├── errors.py               Friendly error messages (added)
 │   ├── countdown_ring.py       Draws the circular countdown image (added)
+│   ├── sounds.py               Makes /timer's beeps and ring (added)
 │   ├── ratelimit_fix.py        Fixes a discord.py rate-limit bug (added)
 │   ├── cogs/
 │   │   ├── voice_events.py     Hub joins, people joining and leaving, startup
-│   │   └── topics.py           The /topic command (added)
+│   │   ├── topics.py           The /topic command (added)
+│   │   └── user_timer.py       The /timer command (added)
 │   ├── services/
 │   │   ├── channel_manager.py  Create, delete, rename, status, lock, limit, owner's crown
 │   │   ├── session_setup.py    Posts a new channel's messages, from the hub or /topic (added)
 │   │   ├── naming.py           Deletes a channel that isn't named in time (added)
 │   │   ├── timer.py            Countdown, extension, auto-close
-│   │   └── topics.py           A topic's interested list, its VC and the invites (added)
+│   │   ├── topics.py           A topic's interested list, its VC and the invites (added)
+│   │   ├── user_timer.py       A /timer's count-in, countdown and ring (added)
+│   │   └── speaker.py          Joins voice for a moment to play a sound (added)
 │   └── views/
 │       ├── owner_only.py       Shared owner-only check (added)
 │       ├── name_prompt.py      "Name your channel" button (added)
@@ -47,15 +53,17 @@ temp-vc-bot/
 │       ├── end_confirm.py      "End now?" question before ending early (added)
 │       ├── topic_card.py       What a topic card shows (added)
 │       ├── topic_draft.py      The /topic form and the private card (added)
-│       └── topic_ad.py         The public card with I'm interested (added)
+│       ├── topic_ad.py         The public card with I'm interested (added)
+│       └── user_timer.py       A /timer's Start, Pause and Stop buttons (added)
 └── tests/                      Automated tests (added)
     ├── fake_discord.py         A stand-in for Discord's servers
     ├── test_end_to_end.py      The real bot against the stand-in
     ├── test_topics.py          /topic against the stand-in
+    ├── test_user_timer.py      /timer against the stand-in
     └── test_units.py           Small pieces on their own
 ```
 
-**Eight additions to the suggested layout:**
+**Nine additions to the suggested layout:**
 
 - `errors.py`: the buttons, forms and event handlers all need the same friendly messages, so they live in one place.
 - `countdown_ring.py`: Discord embeds can't draw shapes, so the circular countdown is a picture. This file only draws it. `timer.py` decides what it shows and when.
@@ -64,6 +72,7 @@ temp-vc-bot/
 - `services/naming.py` and `views/name_prompt.py`: making the owner name each channel wasn't in the brief. The prompt and its button live in the view, and the 2-minute deadline lives in the service, next to the timer.
 - `views/end_confirm.py`: the End discussion button wasn't in the brief. Ending a channel early can't be undone, so the button asks the owner to confirm first, and that question lives here.
 - `/topic` wasn't in the brief either. The command is in `cogs/topics.py`, the work behind it in `services/topics.py`, and its cards in the three `views/topic_*.py` files. A topic's VC is set up the same way as one from the hub, so that step moved from `voice_events.py` into `services/session_setup.py`, which both use.
+- `/timer` wasn't in the brief either. The command is in `cogs/user_timer.py`, the timer itself in `services/user_timer.py` and its buttons in `views/user_timer.py`. `sounds.py` makes the beeps and the ring in code, the way `countdown_ring.py` draws the ring, so there are no sound files. `services/speaker.py` plays them, and is the only part of the bot that joins voice.
 - `tests/`: lets you check a change without a live server. The bot doesn't need these files to run.
 
 ## Where the brief and Discord disagree
@@ -80,7 +89,7 @@ If you do make the bot an Administrator, the code notices and writes the fifth o
 
 ### 2. A user limit of 99 can't get an extra seat
 
-The brief asks for 0 to 99 people, plus a seat for the bot. This bot doesn't join voice, so it needs no seat, but another bot in the channel, such as a music bot, still gets one. Discord's maximum is [99 seats](https://docs.discord.com/developers/resources/channel), so 99 people plus a bot would need 100.
+The brief asks for 0 to 99 people, plus a seat for the bot. This bot only joins voice for a few seconds, to play a /timer's sounds, so it needs no seat, but another bot in the channel, such as a music bot, still gets one. Discord's maximum is [99 seats](https://docs.discord.com/developers/resources/channel), so 99 people plus a bot would need 100.
 
 **What the bot does:** it sets 99 seats, which leaves room for 98 people while a bot is inside, and tells the owner so. Every lower number works as the brief describes.
 
@@ -96,9 +105,12 @@ Discord lets some people past these, and a bot can't change that:
 
 These don't conflict with the brief, but the bot would fail without handling them:
 
+- **Voice needs `davey` and Opus.** Discord has [required end-to-end encryption (DAVE)](https://docs.discord.com/developers/topics/voice-connections) on voice channels since March 2026, and refuses other connections with close code 4017. Support arrived in discord.py 2.7.0, and the library needs the `davey` package to use it. The `discord.py[voice]` extra installs both `davey` and PyNaCl. Sending sound also needs the Opus library, which isn't a Python package. discord.py brings its own on Windows, and on Linux or a Mac it has to be installed. Without it, /timer works silently and the startup log says how to install it.
+- **A bot can only be in one voice channel per server.** So /timer's sounds in different channels take turns. A channel waits up to 5 seconds (`SOUND_JOIN_SECONDS`) for its turn and for the bot to connect. After that, a count-in goes ahead silently and a ring is skipped. A sound is never worth holding up a timer for.
+- **Leaving voice has to be confirmed before joining again.** Discord confirms a leave with an event. If that event arrives after the bot has joined another channel, it cuts off the new connection. discord.py's own voice client waits for the confirmation, and the stand-in in `tests/` does too, so the tests catch code that skips it.
 - **Renames could hang for 10 minutes.** By default, discord.py quietly sleeps through a rate limit, so a rename would appear to do nothing. The bot sets `max_ratelimit_timeout`, which makes the library raise an error instead, and the owner sees "try again in about 9 minutes". Discord doesn't document the rename limit, so the bot relies on Discord's own answer and doesn't count renames itself.
 - **That setting allowed only one new channel per day.** Discord counts new channels over 24 hours. With `max_ratelimit_timeout` set, discord.py refused every channel after the first until that window ended, even though Discord would have allowed more, and the log showed "Too many requests. Retry in 86251 seconds". [ratelimit_fix.py](src/temp_vc_bot/ratelimit_fix.py) lets requests through while Discord says some are left. When none are left, the member gets "try again later" in the hub straight away.
-- **Setting a status without joining needs two permissions.** [Discord requires Manage Channels as well as Set Voice Channel Status](https://docs.discord.com/developers/resources/channel) from anyone not connected to the channel, which includes this bot. Its overwrite grants both. An overwrite can't grant a permission the bot lacks in the server, and Discord would refuse the whole overwrite, so a bot invited with an older link leaves Set Voice Channel Status out. Everything except the status keeps working, naming included, and the startup log says what's missing.
+- **Setting a status without joining needs two permissions.** [Discord requires Manage Channels as well as Set Voice Channel Status](https://docs.discord.com/developers/resources/channel) from anyone not connected to the channel, which includes this bot nearly all the time. Its overwrite grants both. An overwrite can't grant a permission the bot lacks in the server, and Discord would refuse the whole overwrite, so a bot invited with an older link leaves Set Voice Channel Status out. Everything except the status keeps working, naming included, and the startup log says what's missing.
 - **Losing Connect removes other permissions.** [Denying Connect also denies Manage Channel](https://docs.discord.com/developers/topics/permissions). The bot's own Connect overwrite is what lets it still manage and delete a locked channel.
 - **A channel nobody entered gets no "leave" event.** If the owner leaves voice before the bot can move them in, the bot deletes the new channel at once. Otherwise it would stay forever.
 - **The bot can reconnect at any time.** Discord may fire `on_ready` more than once, and discord.py then replaces its cached objects. So startup cleanup runs only once, sessions store IDs instead of objects, and the bot catches up on anything it missed while disconnected.
@@ -144,14 +156,15 @@ The brief left these open. Each one is easy to change.
 
 **Bots**
 
-- The bot never joins voice channels. It doesn't need to be in a channel to create, change or delete it, so it manages every temp VC through its permissions. It isn't listed in any channel and uses no seat.
+- The bot doesn't need to be in a channel to create, change or delete it, so it manages every temp VC through its permissions. It only joins one to play a /timer's beeps or ring, deafened, and leaves as soon as the sound ends. The rest of the time it isn't listed in any channel.
+- Those visits take no seat. The bot has Move Members, so it can join a full channel anyway, and adding and removing a seat for every beep would use up channel edits. While it's in, for a few seconds, a channel with one seat left is full.
 - Other bots, such as a music bot, count as non-humans. They don't start the timer or keep an empty channel open, and each one gets its own extra seat.
 
 **Control panel**
 
 - The panel and the timer are two separate messages, so each can update on its own.
 - The panel message tags the owner, so they notice it. Anyone in the chat can see it.
-- Besides the four permissions in its overwrite, the bot also gives itself Send Messages, Embed Links, Attach Files and Set Voice Channel Status on each channel, so a category's settings can't stop it posting the panel or the countdown ring, or setting a status.
+- Besides the four permissions in its overwrite, the bot also gives itself Send Messages, Embed Links, Attach Files, Set Voice Channel Status and Speak on each channel, so a category's settings can't stop it posting the panel or the countdown ring, setting a status, or playing a /timer's sounds. Like the status, Speak is only given if the bot has it in the server, or Discord would refuse the whole overwrite.
 - The lock button's label shows the state and the action, such as "Unlocked (click to lock)", so nobody reads "Locked" as a command.
 - Setting a limit lower than the number of people inside removes nobody. It only stops new people joining.
 - **End discussion** lets the owner delete the channel before time runs out. Ending can't be undone and disconnects everyone, so the button only asks a private "End now?" question first. An unanswered question expires after 60 seconds (`END_CONFIRM_SECONDS`) and leaves the channel alone. The button works in every phase, including before the timer starts.
@@ -184,6 +197,25 @@ The brief left these open. Each one is easy to change.
 - While someone's reply is showing, their next messages don't get another one, so posting ten messages in a row doesn't bring ten replies.
 - The bot can't see what people write, because that needs the privileged Message Content intent, so every message gets the same reply. The reply shows `/topic` as a command mention, which people can click to fill in the command. The bot gets the command's ID when it registers it. If registering failed, the reply shows plain `/topic` text.
 
+**/timer**
+
+- `/timer` only works in a temp VC's chat. There the bot is sure to have the permissions it needs, and the timer goes when the channel does. Anywhere else, it privately says so.
+- Anyone in that voice channel can set a timer and use its buttons, not only the owner. It's for the people in the call, like a kitchen timer. Anyone not in the channel gets a private note.
+- A timer is 1 to 60 whole minutes (`MIN_USER_TIMER_MINUTES`, `MAX_USER_TIMER_MINUTES`). Like every other duration, it follows `SECONDS_PER_MINUTE` for testing.
+- A channel has one timer at a time. One that has finished or been stopped doesn't count, and nor does one whose message someone deleted.
+- It's separate from the channel's own timer. It doesn't make the channel last longer or close sooner.
+- **Start** counts 3, 2, 1, a second apart (`COUNT_IN_FROM`, `COUNT_IN_BEAT_SECONDS`), with a beep on each and a higher beep as the timer starts. Carrying on after a pause counts in again, so everyone's ready.
+- The count-in waits until the bot is in the channel, so the numbers and the beeps line up. That usually takes a second or two, and the timer says "get ready" meanwhile. The sound times its own beeps, and the numbers follow the same schedule, so a slow edit can't make them drift apart.
+- **Pause** works during the count-in too. Before the timer has ever run, that takes it back to the start.
+- When time is up, the bot rings for 3 seconds (`RING_SECONDS`). It starts joining 5 seconds before the end, so the ring is on time. The timer shows "time's up" on time even if joining is slow, because the ring runs alongside it.
+- **Stop** doesn't ring: whoever clicked it already knows. It needs no confirming, unlike ending a channel, because a timer is easy to set again.
+- When a timer finishes or stops, its buttons go, and its message shows the result.
+- The ring shows the minutes and seconds left, rounded up, and is redrawn every 10 seconds (`USER_TIMER_REDRAW_SECONDS`). The redraws are counted back from the end, like the channel's ring, so the time is exact each time it's drawn. Every redraw is a new picture, with the same blurred moment as the channel's ring, so it isn't redrawn every second. The text above it shows the end time, which doesn't change, for the same reason as the channel's timer.
+- Discord allows about 5 edits per 5 seconds in a channel. The count-in's 3, 2, 1 and the start use 4. The "get ready" that comes first is the bot's answer to the Start click itself, which doesn't count.
+- The timer isn't moved to the bottom of the chat, unlike the channel's timer. The channel's timer moves below it when it's posted.
+- The sounds are made in code (`sounds.py`) at 30% of full volume. People can turn the bot down in Discord, like anyone else.
+- Timers live in memory, like sessions. A restart deletes every temp VC, and their timers with them.
+
 **Restarts**
 
 - A restart deletes every temp VC, even with people in them, as the brief specifies. Plan updates for a quiet moment.
@@ -203,4 +235,4 @@ uv run pytest
 
 The tests run the real bot and the real discord.py library against a local stand-in for Discord, over real HTTP and websockets. No token or internet connection is needed. The stand-in enforces the Discord rules above, so it refuses things that real Discord would refuse.
 
-**What the tests can't cover:** Discord's real responses can differ from the stand-in's. The [test checklist in DEPLOYMENT.md](DEPLOYMENT.md#test-checklist) covers what to try on a real server.
+**What the tests can't cover:** the stand-in has no audio connection, so the bot's real voice handshake, including DAVE, and what the beeps sound like can only be checked on a real server. Discord's real responses can also differ from the stand-in's. The [test checklist in DEPLOYMENT.md](DEPLOYMENT.md#test-checklist) covers what to try on a real server.
