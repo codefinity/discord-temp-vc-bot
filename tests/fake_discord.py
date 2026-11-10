@@ -874,8 +874,10 @@ class FakeDiscord:
                 return _error(400, 50035, "Invalid Form Body")
         if "user_limit" in body and not 0 <= body["user_limit"] <= 99:
             return _error(400, 50035, "Invalid Form Body")
+        if "topic" in body and len(body["topic"] or "") > 1024:
+            return _error(400, 50035, "Invalid Form Body")
         channel = self.channels[channel_id]
-        channel.update({key: body[key] for key in ("name", "user_limit") if key in body})
+        channel.update({key: body[key] for key in ("name", "user_limit", "topic") if key in body})
         await self._dispatch("CHANNEL_UPDATE", channel)
         return _json(channel, headers=headers)
 

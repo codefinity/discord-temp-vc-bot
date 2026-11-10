@@ -178,6 +178,8 @@ The brief left these open. Each one is easy to change.
 - If the member who clicks **Create a VC** is in a voice channel, they're moved into the new VC. If not, it waits for them or anyone else. If nobody joins within 5 minutes (`TOPIC_JOIN_DEADLINE_MINUTES`), it's deleted, because no "leave" event would ever clean it up. The member is told this when the VC is created.
 - One person can own one temp VC at a time, from the hub or `/topic`. **Create a VC** tells someone who already owns one to end it first.
 - Topics live in memory, like sessions. After a restart, buttons on cards posted before it stop working, and members start a new topic.
+- The topic channel's own topic, the line Discord shows at the top of a channel, explains `/topic` and asks people not to write anything else there (`TOPIC_CHANNEL_DESCRIPTION`). This can't be a private message to each person who opens the channel: Discord doesn't tell bots when someone opens a channel, and a bot can only show a message to one person as a reply to something that person clicked or typed. The topic line is shown to everyone, but it isn't a message in the chat.
+- The bot sets the channel's topic on every start, but only if it's different, because Discord allows only a few channel edits every 10 minutes. A change made by hand in Discord is undone at the next start, so change the text in `constants.py` instead. It only asks: everyone can still post, and the bot deletes nobody's messages.
 
 **Restarts**
 

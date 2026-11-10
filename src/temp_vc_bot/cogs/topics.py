@@ -23,6 +23,11 @@ class Topics(commands.Cog):
         self.settings = bot.settings
         self.topics = bot.topic_service
 
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Make sure the topic channel's topic explains /topic. This can run more than once."""
+        await self.topics.describe_channel()
+
     @app_commands.command(name="topic", description=TOPIC_COMMAND_DESCRIPTION)
     @app_commands.guild_only()
     async def topic(self, interaction: discord.Interaction) -> None:

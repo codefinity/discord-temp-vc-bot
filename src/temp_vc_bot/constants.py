@@ -188,3 +188,13 @@ TOPIC_VC_JOIN_SOON_MESSAGE = " If nobody joins within {minutes} minutes, it will
 TOPIC_INVITE_MESSAGE = "{mentions} **{name}** is open, and you said you're interested. Join here: {channel}"
 TOPIC_DRAFT_EXPIRED_MESSAGE = "This draft has expired. Use /topic to start again."
 TOPIC_CHANNEL_MISSING_MESSAGE = "I can't find the channel for topics. Please tell a server admin."
+# The topic channel's own topic: the line Discord shows at the top of the channel,
+# next to its name. A bot can't show a message to one person when they open a
+# channel, so this is where the guide to /topic goes. The bot sets it on every start
+# if it's different. Discord allows up to 1,024 characters.
+TOPIC_CHANNEL_DESCRIPTION = (
+    "👋 Looking for people to talk to? Type **/topic** to start a topic: you'll be asked for a channel name, "
+    "a status and what you'd like to talk about. **Advertise** it here, and everyone who clicks "
+    "**I'm interested** is pinged with a link when you click **Create a VC**. "
+    "⚠️ Please don't write anything else in this channel."
+)
