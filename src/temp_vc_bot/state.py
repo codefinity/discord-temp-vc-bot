@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from .constants import DEFAULT_TIMER_MINUTES, EXTENSION_MINUTES, NO_USER_LIMIT, minutes_to_delta
+from .constants import COUNT_IN_FROM, DEFAULT_TIMER_MINUTES, EXTENSION_MINUTES, NO_USER_LIMIT, minutes_to_delta
 
 if TYPE_CHECKING:
     from .views.control_panel import ControlPanelView
@@ -61,13 +61,13 @@ class UserTimer:
     # The time left while it isn't running. While it runs, ends_at says when it ends.
     remaining: timedelta = field(init=False)
     ends_at: datetime | None = None
-    # The number shown during the count-in, or None until the bot is ready to beep.
+    # The number shown during the count-in: 3, then 2, then 1. None the rest of the time.
     count: int | None = None
     # Whether the countdown has run at all. Until it has, pausing goes back to READY.
     has_run: bool = False
     message_id: int | None = None
     view: UserTimerView | None = None
-    # The count-in, countdown and ring. Pause and Stop cancel it.
+    # The count-in and countdown. Pause and Stop cancel it.
     task: asyncio.Task[None] | None = None
     # Taken while editing the message, so edits go out one at a time.
     message_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -94,9 +94,9 @@ class UserTimer:
         return self.remaining
 
     def count_in(self) -> None:
-        """Get ready to start, or to carry on after a pause."""
+        """Count down to starting, or to carrying on after a pause, from the first number."""
         self.phase = UserTimerPhase.COUNTING_IN
-        self.count = None
+        self.count = COUNT_IN_FROM
 
     def run(self, now: datetime) -> None:
         """Count down what's left, from `now`."""
@@ -124,7 +124,7 @@ class UserTimer:
         self.count = None
 
     def cancel_task(self) -> None:
-        """Stop the count-in, countdown or ring, whichever is happening."""
+        """Stop the count-in or the countdown, whichever is happening."""
         task, self.task = self.task, None
         # A task must not cancel itself, or it would stop before it finished up.
         if task is not None and task is not asyncio.current_task():

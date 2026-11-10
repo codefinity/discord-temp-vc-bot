@@ -10,7 +10,7 @@ import discord
 import pytest
 from PIL import Image
 
-from temp_vc_bot import constants, countdown_ring, main, sounds
+from temp_vc_bot import constants, countdown_ring, main
 from temp_vc_bot.bot import build_intents
 from temp_vc_bot.config import ConfigError, load_settings
 from temp_vc_bot.countdown_ring import render_ring
@@ -231,7 +231,6 @@ class TestIntentsAndInvite:
             manage_channels=True,
             manage_roles=True,
             connect=True,
-            speak=True,
             move_members=True,
             send_messages=True,
             embed_links=True,
@@ -337,43 +336,6 @@ class TestMain:
         assert caught.value.code == main.EXIT_BAD_CONFIG
 
 
-class TestSounds:
-    """The beeps and the ring /timer plays. Discord voice takes 16-bit, 48 kHz stereo."""
-
-    def test_sounds_are_whole_20_millisecond_pieces(self) -> None:
-        # discord.py stops at a piece that's cut short, which would lose the end of a sound.
-        for sound in (sounds.count_in(3, 1.0), sounds.ring(3)):
-            assert len(sound) % sounds.FRAME_BYTES == 0
-
-    def test_count_in_beeps_on_each_number_then_once_more_to_start(self) -> None:
-        sound = sounds.count_in(3, 1.0)
-        # Three beeps a second apart, then the start beep, after the lead-in.
-        lead_in = sounds.LEAD_IN_SECONDS
-        assert sounds.duration(sound) == pytest.approx(lead_in + 3 + 0.4, abs=0.02)
-        for beep_at in (lead_in, lead_in + 1, lead_in + 2, lead_in + 3):
-            assert _loudness(sound, beep_at + 0.05) > 1000, f"Expected a beep at {beep_at}s."
-        for quiet_at in (lead_in + 0.5, lead_in + 1.5, lead_in + 2.5):
-            assert _loudness(sound, quiet_at) == 0, f"Expected silence at {quiet_at}s."
-
-    def test_ring_lasts_as_long_as_asked(self) -> None:
-        assert sounds.duration(sounds.ring(3)) == pytest.approx(3, abs=0.02)
-        assert _loudness(sounds.ring(3), 1.5) > 1000
-
-    def test_sounds_are_not_too_loud(self) -> None:
-        loudest = max(abs(sample) for sample in _samples(sounds.ring(3)))
-        assert loudest < 0.5 * 32767
-
-
-def _samples(pcm: bytes) -> memoryview:
-    return memoryview(pcm).cast("h")
-
-
-def _loudness(pcm: bytes, at_seconds: float) -> int:
-    """The loudest sample in the 10 ms from `at_seconds`."""
-    start = round(at_seconds * sounds.SAMPLE_RATE) * 2  # Two samples per moment, for stereo.
-    return max(abs(sample) for sample in _samples(pcm)[start : start + 960])
-
-
 class TestUserTimerClock:
     def test_minutes_and_seconds_rounded_up(self) -> None:
         assert clock(minutes(5)) == "5:00"
@@ -393,12 +355,12 @@ class TestUserTimerFace:
     def test_ready_shows_the_full_time(self) -> None:
         assert user_timer_face(user_timer(), START) == (1.0, "5:00", "ready")
 
-    def test_count_in_shows_the_time_then_the_numbers(self) -> None:
+    def test_count_in_shows_the_numbers(self) -> None:
         timer = user_timer()
         timer.count_in()
-        assert user_timer_face(timer, START) == (1.0, "5:00", "get ready")
-        timer.count = 3
         assert user_timer_face(timer, START) == (1.0, "3", "get ready")
+        timer.count = 2
+        assert user_timer_face(timer, START) == (1.0, "2", "get ready")
 
     def test_running_empties_the_ring(self) -> None:
         timer = user_timer()

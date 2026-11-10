@@ -88,8 +88,6 @@ class VoiceEvents(commands.Cog):
         before_id, after_id = _channel_id(before), _channel_id(after)
         if before_id == after_id:
             return  # Only something like mute or deafen changed.
-        if self.bot.user is not None and member.id == self.bot.user.id:
-            return  # This bot dropping in to play a /timer's sounds. It takes no seat.
 
         if member.bot:
             await self._on_bot_moved(before_id, after_id)

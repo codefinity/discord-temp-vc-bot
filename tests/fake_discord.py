@@ -26,8 +26,7 @@ Discord's documentation:
 - Slash commands are registered per server. A command interaction names the
   server it was registered to, and has no message, unlike a button click.
 
-It does not handle voice audio. FakeVoiceClient stands in for that part: it joins
-and leaves over the gateway, and records each sound instead of sending it. That's
+It does not handle voice audio. FakeVoiceClient stands in for that part, which is
 why a real voice connection can only be checked on a real server.
 """
 
@@ -59,8 +58,7 @@ MANAGE_ROLES = 1 << 28
 SET_VOICE_CHANNEL_STATUS = 1 << 48
 
 # The exact number in the invite link in DEPLOYMENT.md.
-INVITE_PERMISSIONS = 281475399339024
-assert INVITE_PERMISSIONS == 281475397241872 | SPEAK, "The link before /timer, plus Speak."
+INVITE_PERMISSIONS = 281475397241872
 # The number in the link before Set Voice Channel Status was added, for testing older invites.
 OLD_INVITE_PERMISSIONS = 420531216
 EVERYONE_PERMISSIONS = VIEW_CHANNEL | SEND_MESSAGES | EMBED_LINKS | READ_MESSAGE_HISTORY | CONNECT | SPEAK
@@ -91,23 +89,8 @@ UPLOADS = web.RequestKey("uploads", dict)
 class FakeVoiceClient(discord.VoiceProtocol):
     """Joins and leaves voice over the gateway, but skips the audio connection."""
 
-    # Every sound played, as (channel ID, the sound). conftest empties it for each test.
-    played: list[tuple[int, bytes]] = []
-
-    def play(self, source: discord.AudioSource, *, after: Any = None, **encoder_settings: Any) -> None:
-        """Take the whole sound at once and record it, as if it played in an instant."""
-        sound = b"".join(iter(source.read, b""))
-        FakeVoiceClient.played.append((self.channel.id, sound))
-        if after is not None:
-            asyncio.get_running_loop().call_soon(after, None)
-
-    def __init__(self, client: discord.Client, channel: discord.abc.Connectable) -> None:
-        super().__init__(client, channel)
-        self._left = asyncio.Event()
-
     async def on_voice_state_update(self, data: dict[str, Any]) -> None:
         if data["channel_id"] is None:
-            self._left.set()
             self.cleanup()
 
     async def on_voice_server_update(self, data: dict[str, Any]) -> None:
@@ -117,16 +100,8 @@ class FakeVoiceClient(discord.VoiceProtocol):
         await self.channel.guild.change_voice_state(channel=self.channel, self_deaf=self_deaf, self_mute=self_mute)
 
     async def disconnect(self, *, force: bool) -> None:
-        """Leave, and wait for Discord to confirm it, as the real VoiceClient does.
-
-        Otherwise the confirmation could arrive after the bot had joined again, and
-        cut off the new connection instead of this one.
-        """
         await self.channel.guild.change_voice_state(channel=None)
-        try:
-            await asyncio.wait_for(self._left.wait(), timeout=5)
-        finally:
-            self.cleanup()
+        self.cleanup()
 
 
 @dataclass
@@ -174,7 +149,7 @@ class FakeDiscord:
         self.channels: dict[int, dict[str, Any]] = {}
         self.members: dict[int, dict[str, Any]] = {}
         self.voice: dict[int, int] = {}  # Member ID -> voice channel ID.
-        self.bot_voice_flags: dict[str, bool] = {}  # How the bot last joined voice: deafened, muted.
+        self.bot_voice_flags: dict[str, bool] = {}
         self.bot_left_voice_itself = False  # True if it left, rather than being disconnected.
         self.messages: dict[int, dict[str, Any]] = {}
         self.uploaded_files: dict[str, bytes] = {}  # Attachment ID -> the file's bytes.
@@ -742,13 +717,12 @@ class FakeDiscord:
         await self._dispatch("GUILD_CREATE", self._guild_payload())
 
     async def _bot_voice_update(self, data: dict[str, Any]) -> None:
+        self.bot_voice_flags = {"self_deaf": data["self_deaf"], "self_mute": data["self_mute"]}
         channel_id = int(data["channel_id"]) if data["channel_id"] else None
         if channel_id is None:
             self.bot_left_voice_itself = True
             self.voice.pop(BOT_USER_ID, None)
         else:
-            # Kept from the last time it joined, so tests can check it joined deafened.
-            self.bot_voice_flags = {"self_deaf": data["self_deaf"], "self_mute": data["self_mute"]}
             self.voice[BOT_USER_ID] = channel_id
         await self._dispatch("VOICE_STATE_UPDATE", self._voice_state(BOT_USER_ID, channel_id))
 

@@ -13,7 +13,6 @@ from .services.channel_manager import ChannelManager
 from .services.chat_reminder import ChatReminder
 from .services.naming import NamingService
 from .services.session_setup import SessionSetup
-from .services.speaker import Speaker
 from .services.timer import TimerService
 from .services.topics import TopicService
 from .services.user_timer import UserTimerService
@@ -62,15 +61,13 @@ class TempVCBot(commands.Bot):
         self.session_setup = SessionSetup(self.channel_manager, self.timer_service, self.naming_service)
         self.topic_service = TopicService(self.channel_manager, self.session_setup)
         self.chat_reminder = ChatReminder()
-        self.speaker = Speaker()
-        self.user_timer_service = UserTimerService(self.channel_manager, self.speaker)
+        self.user_timer_service = UserTimerService(self.channel_manager)
 
     async def setup_hook(self) -> None:
         """Runs once before the bot connects. Loads the event handlers, /topic and /timer."""
         await self.load_extension("temp_vc_bot.cogs.voice_events")
         await self.load_extension("temp_vc_bot.cogs.topics")
         await self.load_extension("temp_vc_bot.cogs.user_timer")
-        self.speaker.report_setup_problems()
         await self._register_commands()
 
     async def _register_commands(self) -> None:
