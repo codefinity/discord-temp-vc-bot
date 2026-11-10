@@ -11,7 +11,7 @@ import pytest
 
 from temp_vc_bot.bot import TempVCBot
 from temp_vc_bot.constants import MAX_INTERESTED_SHOWN, TOPIC_CHANNEL_DESCRIPTION
-from temp_vc_bot.services import topics
+from temp_vc_bot.services import chat_reminder, topics
 from temp_vc_bot.services.topics import Topic
 from temp_vc_bot.state import TimerPhase
 from temp_vc_bot.views import topic_ad, topic_draft
@@ -443,6 +443,74 @@ class TestChannelTopic:
 
     def test_the_text_fits_discords_limit(self) -> None:
         assert len(TOPIC_CHANNEL_DESCRIPTION) <= 1024
+
+
+def chat_replies(world: FakeDiscord) -> list[dict[str, Any]]:
+    return [m for m in world.messages_in(TOPIC_CHANNEL_ID) if m.get("message_reference_sent")]
+
+
+class TestChatReplies:
+    async def test_a_message_gets_a_reply_telling_them_to_use_topic(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        member = world.add_member("Alice")
+        said = await world.say(member, TOPIC_CHANNEL_ID, "anyone want to chat?")
+        await world.settle()
+        [reply] = chat_replies(world)
+        command_id = world.commands[GUILD_ID][0]["id"]
+        assert reply["content"] == (
+            f"This channel is only for </topic:{command_id}>. Type it to start a topic, and please don't chat here."
+        )
+        assert int(reply["message_reference_sent"]["message_id"]) == int(said["id"])
+        assert reply["allowed_mentions_sent"]["replied_user"] is True
+        assert int(said["id"]) in world.messages  # Their message stays.
+
+    async def test_the_reply_is_deleted_after_a_while(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(chat_reminder, "TOPIC_CHAT_REPLY_SECONDS", 0.3)
+        member = world.add_member("Alice")
+        await world.say(member, TOPIC_CHANNEL_ID)
+        await world.wait_for(lambda: len(chat_replies(world)) == 1)
+        await world.wait_for(lambda: chat_replies(world) == [])
+
+    async def test_someone_posting_again_while_the_reply_shows_gets_no_second_one(self, world: FakeDiscord, bot: TempVCBot, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(chat_reminder, "TOPIC_CHAT_REPLY_SECONDS", 0.5)
+        member = world.add_member("Alice")
+        for _ in range(3):
+            await world.say(member, TOPIC_CHANNEL_ID)
+        await world.settle()
+        assert len(chat_replies(world)) == 1
+        await world.wait_for(lambda: chat_replies(world) == [])
+        await world.say(member, TOPIC_CHANNEL_ID)
+        await world.settle()
+        assert len(chat_replies(world)) == 1  # Once it's gone, the next message gets one.
+
+    async def test_each_person_gets_their_own_reply(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        alice, bob = world.add_member("Alice"), world.add_member("Bob")
+        said = [await world.say(alice, TOPIC_CHANNEL_ID), await world.say(bob, TOPIC_CHANNEL_ID)]
+        await world.settle()
+        replied_to = sorted(int(reply["message_reference_sent"]["message_id"]) for reply in chat_replies(world))
+        assert replied_to == sorted(int(message["id"]) for message in said)
+
+    async def test_bots_get_no_reply(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        music_bot = world.add_member("MusicBot", bot=True)
+        await world.say(music_bot, TOPIC_CHANNEL_ID)
+        host, bob = world.add_member("Alice"), world.add_member("Bob")
+        card = await advertise(world, host)
+        await world.click(bob, card, "I'm interested")
+        await world.click(host, card, "Create a VC")
+        assert len(invites(world)) == 1  # The bot's own messages don't get replies either.
+        assert chat_replies(world) == []
+
+    async def test_messages_in_other_channels_get_no_reply(self, world: FakeDiscord, bot: TempVCBot) -> None:
+        member = world.add_member("Alice")
+        await world.say(member, HUB_ID)
+        await world.settle()
+        assert [m for m in world.messages.values() if m.get("message_reference_sent")] == []
+
+    async def test_without_a_registered_command_the_reply_says_plain_topic(self, world: FakeDiscord, start_bot: BotStarter) -> None:
+        world.refuse_command_registration = True
+        await start_bot()
+        await world.say(world.add_member("Alice"), TOPIC_CHANNEL_ID)
+        await world.settle()
+        assert chat_replies(world)[0]["content"].startswith("This channel is only for /topic.")
 
 
 class TestTopicUnits:

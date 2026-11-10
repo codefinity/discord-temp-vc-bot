@@ -191,7 +191,7 @@ You can share this section with your server.
 
 **When a channel closes,** everyone in it is disconnected and the channel is deleted. This also happens the moment the last person leaves, or when you end the discussion, whatever the timer says.
 
-**Finding a group with /topic:** in **#find-your-group**, type `/topic` and press Enter. The line at the top of the channel, next to its name, explains this too.
+**Finding a group with /topic:** in **#find-your-group**, type `/topic` and press Enter. The line at the top of the channel, next to its name, explains this too. The channel is only for /topic: if you write a message there, the bot replies to tell you so, and deletes its reply after 30 seconds.
 
 1. A form asks for the channel's name, its status, and what you want to discuss. All three are required.
 2. You see a card that only you can see. **Edit** changes what you typed.
@@ -253,6 +253,7 @@ You need a friend or a second account for this. Keep the terminal open, so you c
 **/topic**
 
 - [ ] **Channel topic:** open #find-your-group. The line at the top, next to the channel's name, explains /topic and asks people not to write anything else there. The bot posts nothing about it in the chat.
+- [ ] **Chatting:** post a message in #find-your-group. The bot replies to it within a moment, pinging you, and saying the channel is only for /topic. Click **/topic** in the reply, and the command is filled in. Post twice more straight away: no more replies. After 30 seconds the reply disappears, and your messages stay.
 - [ ] **Wrong channel:** type `/topic` in another channel. Only you see a note saying where to use it.
 - [ ] **Form:** type `/topic` in #find-your-group. A form asks for a channel name, a status and a topic, and won't submit with an empty box.
 - [ ] **Private card:** submit it. A card appears that says only you can see it, and your friend can't see it. Click **Edit**, change the topic and submit. The card updates.
@@ -302,6 +303,7 @@ If there's no message at all, make sure you restarted the bot after editing `.en
 | `/topic` says it only works in another channel | You're in a different channel from the one in `TOPIC_CHANNEL_ID`, or that ID is wrong. |
 | **Advertise** says the bot doesn't have permission | The bot can't post in the topic channel. The startup log names what's missing. Check the channel's **Permissions** for anything that denies the bot's role. |
 | The line at the top of #find-your-group doesn't explain /topic | The bot can't edit the channel. The log says `Could not set the topic channel's topic`, and the startup log names the missing permission. Check the channel's **Permissions** for anything that denies Manage Channels to the bot's role, then restart the bot. |
+| Nobody gets a reply when they post in #find-your-group | The bot can't post there. The log says `Could not reply to a message in the topic channel`. Check the channel's **Permissions** for anything that denies Send Messages to the bot's role. |
 | You changed #find-your-group's topic, and it changed back | The bot sets it on every start. To change the wording, edit `TOPIC_CHANNEL_DESCRIPTION` in `src/temp_vc_bot/constants.py` and restart the bot. |
 
 ### Missing permissions
